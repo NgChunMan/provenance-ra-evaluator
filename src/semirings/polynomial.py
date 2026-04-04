@@ -278,8 +278,8 @@ class PolynomialSemiring(Semiring):
     all annotations are Polynomial objects and all semiring operations
     delegate to Polynomial.add / Polynomial.multiply.
     """
-    def zero(self) -> Polynomial:   return Polynomial.zero()
-    def one(self) -> Polynomial:   return Polynomial.one()
+    def zero(self) -> Polynomial: return Polynomial.zero()
+    def one(self) -> Polynomial: return Polynomial.one()
     def add(self, a: Polynomial, b: Polynomial) -> Polynomial: return a.add(b)
     def mul(self, a: Polynomial, b: Polynomial) -> Polynomial: return a.multiply(b)
     def is_zero(self, a: Polynomial) -> bool: return a.is_zero()

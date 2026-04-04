@@ -19,7 +19,7 @@ from .base import Semiring
 
 class CountingSemiring(Semiring):
     def zero(self) -> int: return 0
-    def one(self)  -> int: return 1
+    def one(self) -> int: return 1
     def add(self, a: int, b: int) -> int: return a + b
     def mul(self, a: int, b: int) -> int: return a * b
     def is_zero(self, a: int) -> bool: return a == 0
