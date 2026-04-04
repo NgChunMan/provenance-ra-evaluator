@@ -5,33 +5,27 @@ Two strategies implement the δ operator differently. The choice
 determines how much provenance information survives deduplication.
 
 EXISTENCE
-    Formal rule:  δ(R)(t) = semiring.one() if R(t) ≠ semiring.zero()
-    Works with :  any semiring
-    Provenance :  none — only tuple presence is recorded
+    Formal rule: δ(R)(t) = semiring.one() if R(t) ≠ semiring.zero()
+    Works with : any semiring
+    Provenance : none — only tuple presence is recorded
 
     Every nonzero annotation collapses to the multiplicative identity.
+    In 𝔹 True → True (a complete no-op).
+    In 𝔹[X] a rich formula like (x1 ∧ x3) ∨ x2 → the constant True.
     In ℕ that means any count → 1.
     In ℕ[X] a rich polynomial like 2t₁² + t₁t₂ → the constant 1.
-    In 𝔹 True → True (a complete no-op).
 
-LINEAGE
-    Formal rule:  δ(R)(t) = frozenset{ x ∈ X | x appears in R(t) }
-    Works with:   PolynomialSemiring only
-    Provenance:   which input tuples contributed (why-provenance level)
+HOW_PROVENANCE
+    Formal rule: δ(R)(t) = R(t) if R(t) ≠ semiring.zero()
+    Works with: Any semiring
+    Provenance: the complete annotation is preserved (how-provenance level)
 
-    Scans every monomial of the polynomial annotation and collects
-    all distinct tuple-ID variable names. The result is a frozenset
-    of strings. It records *which* input tuples are responsible for the 
-    output tuple, but not *how* they contributed (coefficients and exponents 
-    are discarded).
-
-    Useful for:
-      - Trust / access-control queries ("did a sensitive tuple contribute?")
-      - Probabilistic databases ("what is the probability this
-                                  output tuple exists, given
-                                  independent tuple probabilities?")
-      - Debugging ("which source records led to
-                   this result row?")
+    The annotation already IS the how-provenance — no transformation needed:
+      - 𝔹 Boolean: True → True  (identical to EXISTENCE; True = one())
+      - PosBool[X] formula: each DNF clause = a minimal sufficient witness set
+      - ℕ Counting: 42 → 42  (multiplicity preserved; contrast EXISTENCE: 42 → 1)
+      - ℕ[X] polynomial: coefficients = number of derivation paths,
+                         exponents = times a tuple was reused in a path
 """
 
 from enum import Enum, auto
@@ -39,4 +33,4 @@ from enum import Enum, auto
 
 class DedupStrategy(Enum):
     EXISTENCE = auto()   # collapse any nonzero annotation → semiring.one()
-    LINEAGE   = auto()   # extract set of contributing variable names
+    HOW_PROVENANCE = auto()   # pass annotation through unchanged

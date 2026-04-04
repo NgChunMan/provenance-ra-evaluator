@@ -5,13 +5,13 @@ operator.
 Test index
 ----------
 TC-1  EXISTENCE collapses polynomial annotations to Polynomial.one()
-TC-2  LINEAGE extracts correct variable sets (the worked example)
+TC-2  HOW_PROVENANCE preserves annotation unchanged (the worked example)
 TC-3  Zero-annotation tuples are excluded from both strategies
 TC-4  Boolean semiring — EXISTENCE is a complete no-op
 TC-5  Counting semiring — EXISTENCE discards multiplicity
 TC-6  Idempotence: δ(δ(R)) == δ(R) for EXISTENCE
 TC-7  Single-variable polynomial (minimal nontrivial case)
-TC-8  LINEAGE raises TypeError for non-Polynomial annotations
+TC-8  HOW_PROVENANCE works correctly for BoolFunc annotations
 TC-9  Empty relation → empty result for both strategies
 
 Test data / schemas
@@ -54,14 +54,12 @@ TC-4  — Boolean semiring, schema: (Name,)
         │ Bob   │ True       │
         └───────┴────────────┘
 
-TC-5, TC-8  — Counting semiring, schema: (Name,)
-        ┌───────┬────────────┐
-        │ Name  │ Annotation │
-        ├───────┼────────────┤
-        │ Alice │ 42         │  (TC-5)
-        │ Bob   │ 7          │  (TC-5)
-        │ Alice │ 5          │  (TC-8)
-        └───────┴────────────┘
+TC-8  — BoolFunc semiring (PosBool[X]), schema: (Name,)
+        ┌───────┬───────────────────────┐
+        │ Name  │ Annotation            │
+        ├───────┼───────────────────────┤
+        │ Alice │ (x1 ∧ x3) ∨ x2        │
+        └───────┴───────────────────────┘
 
 TC-7  — Polynomial semiring, schema: (Name,)
         ┌───────┬────────────┐
@@ -75,7 +73,7 @@ TC-9  — Polynomial semiring, schema: (Name,), empty relation (no rows)
 
 import pytest
 
-from src.semirings import BOOL_SR, NAT_SR, POLY_SR, Polynomial
+from src.semirings import BOOL_SR, BOOLFUNC_SR, BoolFunc, NAT_SR, POLY_SR, Polynomial
 from src.relation  import KRelation
 from src.operators.deduplication import deduplication
 from src.strategies import DedupStrategy
@@ -123,50 +121,49 @@ class TestExistenceCollapseToOne:
         )
 
 
-class TestLineageExtractsCorrectVariableSets:
+class TestHowProvenancePreservesAnnotation:
     """
-    LINEAGE strategy must produce exactly the frozenset of all
-    tuple-ID variable names that appear in each polynomial.
+    HOW_PROVENANCE strategy must return each nonzero polynomial annotation
+    completely unchanged — coefficients, exponents, and variable names all
+    preserved.
 
-    Alice  t1² + t1·t3 + t2²  →  {t1, t2, t3}
-        t1 appears in t1² and t1·t3
-        t2 appears in t2²
-        t3 appears in t1·t3
+    Alice  t1² + t1·t3 + t2²  →  t1² + t1·t3 + t2²  (identity)
+    Bob    t1·t3 + t3²  →  t1·t3 + t3²  (identity)
 
-    Bob    t1·t3 + t3²        →  {t1, t3}
-        t2 is ABSENT because Bob never joined with an HR tuple.
-        This is the key insight: LINEAGE reveals which subsets of
-        the input contributed, while EXISTENCE hides it completely.
+    The full polynomial is the how-provenance: coefficients record the
+    number of derivation paths, exponents record how many times each
+    input tuple was used in a single path. HOW_PROVENANCE discards nothing.
     """
 
     def setup_method(self):
         self.rel = _build_worked_example_relation()
-        self.result = deduplication(self.rel, DedupStrategy.LINEAGE)
+        self.result = deduplication(self.rel, DedupStrategy.HOW_PROVENANCE)
+        t1 = Polynomial.from_var("t1")
+        t2 = Polynomial.from_var("t2")
+        t3 = Polynomial.from_var("t3")
+        self.alice_poly = t1.multiply(t1).add(t1.multiply(t3)).add(t2.multiply(t2))
+        self.bob_poly = t1.multiply(t3).add(t3.multiply(t3))
 
-    def test_alice_why_set_is_all_three_vars(self):
-        alice_why = self.result._data.get(("Alice",))
-        assert alice_why == frozenset({"t1", "t2", "t3"}), (
-            f"Alice's why-set should be {{t1,t2,t3}}, got {alice_why}"
+    def test_alice_annotation_is_unchanged(self):
+        assert self.result._data.get(("Alice",)) == self.alice_poly, (
+            "HOW_PROVENANCE must preserve Alice's full polynomial annotation"
         )
 
-    def test_bob_why_set_excludes_t2(self):
-        bob_why = self.result._data.get(("Bob",))
-        assert "t2" not in (bob_why or set()), (
-            "t2 (Alice-HR) should be absent: Bob has no HR dept, "
-            "so no HR pair was ever formed in the join"
+    def test_bob_annotation_is_unchanged(self):
+        assert self.result._data.get(("Bob",)) == self.bob_poly, (
+            "HOW_PROVENANCE must preserve Bob's full polynomial annotation"
         )
 
-    def test_bob_why_set_is_t1_and_t3(self):
-        bob_why = self.result._data.get(("Bob",))
-        assert bob_why == frozenset({"t1", "t3"}), (
-            f"Bob's why-set should be {{t1,t3}}, got {bob_why}"
+    def test_support_size_unchanged(self):
+        assert self.result.support_size() == 2, (
+            "Deduplication must not add or remove tuples from the support"
         )
 
 
 class TestZeroAnnotationTuplesAreExcluded:
     """
     A tuple stored with annotation Polynomial.zero() is absent from the
-    relation (it is not in the support).  δ must not materialise it.
+    relation (it is not in the support). δ must not materialise it.
     """
 
     def setup_method(self):
@@ -180,10 +177,10 @@ class TestZeroAnnotationTuplesAreExcluded:
             "EXISTENCE must not include a tuple with zero annotation"
         )
 
-    def test_lineage_excludes_zero_tuple(self):
-        result = deduplication(self.rel, DedupStrategy.LINEAGE)
+    def test_how_provenance_excludes_zero_tuple(self):
+        result = deduplication(self.rel, DedupStrategy.HOW_PROVENANCE)
         assert ("Ghost",) not in result._data, (
-            "LINEAGE must not include a tuple with zero annotation"
+            "HOW_PROVENANCE must not include a tuple with zero annotation"
         )
 
 
@@ -268,25 +265,43 @@ class TestSingleVariablePolynomial:
             "t5 should collapse to Polynomial.one()"
         )
 
-    def test_lineage_gives_singleton_set(self):
-        result = deduplication(self.rel, DedupStrategy.LINEAGE)
-        assert result._data.get(("Carol",)) == frozenset({"t5"}), (
-            "Single-variable poly t5 should yield why-set {t5}"
+    def test_how_provenance_preserves_polynomial(self):
+        result = deduplication(self.rel, DedupStrategy.HOW_PROVENANCE)
+        assert result._data.get(("Carol",)) == Polynomial.from_var("t5"), (
+            "HOW_PROVENANCE must return the original polynomial t5 unchanged"
         )
 
 
-class TestLineageTypeErrorOnNonPolynomial:
+class TestHowProvenanceBoolFunc:
     """
-    LINEAGE needs to call ann.variables(), which only exists on Polynomial.
-    If a CountingSemiring (or any other) is used, the operator must raise
-    a descriptive TypeError rather than silently returning wrong results.
+    HOW_PROVENANCE works for BoolFunc annotations (PosBool[X] semiring).
+
+    The formula is the how-provenance of PosBool[X]: each DNF clause
+    represents a minimal sufficient witness set (a conjunction of input
+    tuple-IDs).  HOW_PROVENANCE returns it unchanged.
+    EXISTENCE collapses it to BoolFunc.true_() (the semiring one element).
     """
 
-    def test_raises_type_error_for_counting_semiring(self):
-        rel = KRelation(["Name"], NAT_SR)
-        rel._set_raw(("Alice",), 5)
-        with pytest.raises(TypeError):
-            deduplication(rel, DedupStrategy.LINEAGE)
+    def setup_method(self):
+        x1 = BoolFunc.var("x1")
+        x2 = BoolFunc.var("x2")
+        x3 = BoolFunc.var("x3")
+        # (x1 ∧ x3) ∨ x2
+        self.formula = x1.conjoin(x3).disjoin(x2)
+        self.rel = KRelation(["Name"], BOOLFUNC_SR)
+        self.rel._set_raw(("Alice",), self.formula)
+
+    def test_how_provenance_preserves_formula(self):
+        result = deduplication(self.rel, DedupStrategy.HOW_PROVENANCE)
+        assert result._data.get(("Alice",)) == self.formula, (
+            "HOW_PROVENANCE must return the BoolFunc formula unchanged"
+        )
+
+    def test_existence_collapses_formula_to_true(self):
+        result = deduplication(self.rel, DedupStrategy.EXISTENCE)
+        assert result._data.get(("Alice",)) == BOOLFUNC_SR.one(), (
+            "EXISTENCE must collapse any nonzero BoolFunc formula to True"
+        )
 
 
 class TestEmptyRelation:
@@ -302,6 +317,6 @@ class TestEmptyRelation:
         result = deduplication(self.empty, DedupStrategy.EXISTENCE)
         assert result.support_size() == 0
 
-    def test_lineage_on_empty_gives_empty(self):
-        result = deduplication(self.empty, DedupStrategy.LINEAGE)
+    def test_how_provenance_on_empty_gives_empty(self):
+        result = deduplication(self.empty, DedupStrategy.HOW_PROVENANCE)
         assert result.support_size() == 0

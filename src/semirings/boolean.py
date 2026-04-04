@@ -17,7 +17,7 @@ from .base import Semiring
 
 class BooleanSemiring(Semiring):
     def zero(self) -> bool: return False
-    def one(self)  -> bool: return True
+    def one(self) -> bool: return True
     def add(self, a: bool, b: bool) -> bool: return a or b
     def mul(self, a: bool, b: bool) -> bool: return a and b
     def is_zero(self, a: bool) -> bool: return not a
