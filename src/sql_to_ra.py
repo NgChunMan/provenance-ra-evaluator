@@ -1,0 +1,480 @@
+"""
+SQL-to-Relational-Algebra translator.
+
+Translates a subset of SQL SELECT queries into relational algebra
+expression strings compatible with ``src.parser.parse()``.
+
+Supported SQL subset
+--------------------
+- ``SELECT [DISTINCT] col1, col2, ... FROM table1, table2, ... [WHERE cond]``
+- ``SELECT [DISTINCT] * FROM table [WHERE cond]``
+- ``UNION`` / ``UNION ALL`` (both map to multiset union ∪)
+- WHERE conditions: ``=``, ``<>``, ``!=``, ``>=``, ``<=``, ``>``, ``<``,
+  ``AND``, ``OR``, ``NOT``, and parentheses for grouping
+- Qualified column references: ``T.col``
+- Optional ``AS`` aliases on tables and columns (aliases are silently ignored)
+
+Unsupported SQL constructs (raise :class:`SQLTranslationError`)
+---------------------------------------------------------------
+- ``GROUP BY`` / ``HAVING`` / aggregate functions
+- ``ORDER BY`` / ``LIMIT`` / ``OFFSET``
+- Subqueries in FROM or WHERE
+- ``JOIN … ON`` syntax (use ``FROM t1, t2 WHERE …`` instead)
+- ``INTERSECT`` / ``EXCEPT``
+
+SQL → RA operator mapping
+--------------------------
++--------------------------+---------------------------+
+| SQL construct            | RA expression             |
++==========================+===========================+
+| ``FROM R``               | ``R``                     |
+| ``FROM R, S``            | ``(R × S)``               |
+| ``WHERE cond``           | ``σ[cond](…)``            |
+| ``SELECT a, b``          | ``π[a, b](…)``            |
+| ``SELECT *``             | (no projection node)      |
+| ``DISTINCT``             | ``δ(…)``                  |
+| ``UNION``                | ``(… ∪ …)``               |
+| ``AND``                  | ``/\\``                   |
+| ``OR``                   | ``\\/``                   |
+| ``NOT``                  | ``~(…)``                  |
+| ``=``                    | ``==``                    |
+| ``<>``                   | ``!=``                    |
++--------------------------+---------------------------+
+"""
+
+from __future__ import annotations
+
+from typing import List, Optional, Tuple
+
+
+# ── Public exception ──────────────────────────────────────────────────
+
+class SQLTranslationError(ValueError):
+    """
+    Raised when a SQL query cannot be translated to relational algebra.
+
+    This covers both syntax errors and the use of unsupported SQL constructs.
+    """
+
+
+# ── Tokenizer ─────────────────────────────────────────────────────────
+
+_KEYWORDS = frozenset({
+    # Supported
+    'SELECT', 'DISTINCT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT',
+    'UNION', 'ALL', 'AS',
+    # Recognised but unsupported — kept for clear error messages
+    'GROUP', 'BY', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET',
+    'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS', 'ON',
+    'INTERSECT', 'EXCEPT',
+})
+
+# Maps the first keyword of an unsupported trailing clause to its display name.
+_UNSUPPORTED_CLAUSES = {
+    'GROUP': 'GROUP BY (aggregation)',
+    'HAVING': 'HAVING (aggregation filter)',
+    'ORDER': 'ORDER BY',
+    'LIMIT': 'LIMIT',
+    'OFFSET': 'OFFSET',
+    'JOIN': 'JOIN … ON (use FROM t1, t2 WHERE … instead)',
+    'INNER': 'INNER JOIN',
+    'LEFT': 'LEFT JOIN',
+    'RIGHT': 'RIGHT JOIN',
+    'CROSS': 'CROSS JOIN (use FROM t1, t2 instead)',
+    'INTERSECT': 'INTERSECT',
+    'EXCEPT': 'EXCEPT',
+}
+
+_Token = Tuple[str, str]
+_TokenList = List[_Token]
+
+
+def _tokenize(sql: str) -> _TokenList:
+    """
+    Tokenize a SQL string into ``(tag, value)`` pairs.
+
+    Tags
+    ----
+    ``KW``    SQL keyword (stored upper-cased)
+    ``IDENT`` identifier, or ``table.column`` qualified name
+    ``INT``   integer literal (stored as string of digits)
+    ``STR``   string literal (including surrounding single quotes)
+    ``OP``    comparison operator (``=``, ``<>``, ``!=``, ``>=``, ``<=``, ``>``, ``<``)
+    ``COMMA`` ``,``
+    ``STAR``  ``*``
+    ``OPAR``  ``(``
+    ``CPAR``  ``)``
+
+    Raises
+    ------
+    SQLTranslationError
+        On unterminated string literals or unrecognised characters.
+    """
+    tokens: _TokenList = []
+    i = 0
+    n = len(sql)
+
+    while i < n:
+        # Whitespace
+        if sql[i].isspace():
+            i += 1
+            continue
+
+        # String literal 'value'
+        if sql[i] == "'":
+            j = i + 1
+            while j < n and sql[j] != "'":
+                j += 1
+            if j >= n:
+                raise SQLTranslationError(
+                    f"Unterminated string literal starting at position {i}"
+                )
+            tokens.append(('STR', sql[i : j + 1]))
+            i = j + 1
+            continue
+
+        # Two-character operators
+        if i + 1 < n and sql[i : i + 2] in ('<>', '!=', '>=', '<='):
+            tokens.append(('OP', sql[i : i + 2]))
+            i += 2
+            continue
+
+        # Single-character operators and punctuation
+        if sql[i] in ('=', '>', '<'):
+            tokens.append(('OP', sql[i]))
+            i += 1
+            continue
+        if sql[i] == ',':
+            tokens.append(('COMMA', ','))
+            i += 1
+            continue
+        if sql[i] == '*':
+            tokens.append(('STAR', '*'))
+            i += 1
+            continue
+        if sql[i] == '(':
+            tokens.append(('OPAR', '('))
+            i += 1
+            continue
+        if sql[i] == ')':
+            tokens.append(('CPAR', ')'))
+            i += 1
+            continue
+
+        # Integer literal
+        if sql[i].isdigit():
+            j = i
+            while j < n and sql[j].isdigit():
+                j += 1
+            tokens.append(('INT', sql[i : j]))
+            i = j
+            continue
+
+        # Identifier or keyword
+        if sql[i].isalpha() or sql[i] == '_':
+            j = i
+            while j < n and (sql[j].isalnum() or sql[j] == '_'):
+                j += 1
+            word = sql[i : j]
+            upper = word.upper()
+            if upper in _KEYWORDS:
+                tokens.append(('KW', upper))
+                i = j
+            else:
+                # Handle table.column qualified references
+                if j < n and sql[j] == '.':
+                    k = j + 1
+                    while k < n and (sql[k].isalnum() or sql[k] == '_'):
+                        k += 1
+                    col = sql[j + 1 : k]
+                    if not col:
+                        raise SQLTranslationError(
+                            f"Expected a column name after '.' in '{word}.'"
+                        )
+                    tokens.append(('IDENT', f"{word}.{col}"))
+                    i = k
+                else:
+                    tokens.append(('IDENT', word))
+                    i = j
+            continue
+
+        raise SQLTranslationError(
+            f"Unrecognised character '{sql[i]}' at position {i}"
+        )
+
+    return tokens
+
+
+# ── Recursive-descent translator ──────────────────────────────────────
+
+class _Translator:
+    """
+    Consumes a token list and produces a relational algebra expression string.
+
+    The grammar supported is::
+
+        query:= select_stmt (UNION [ALL] select_stmt)*
+        select_stmt:= SELECT [DISTINCT] col_list FROM table_list [WHERE condition]
+        col_list:= * | col (, col)*
+        col:= IDENT [AS IDENT]
+        table_list:= table (, table)*
+        table:= IDENT [AS IDENT]
+        condition:= or_cond
+        or_cond:= and_cond (OR and_cond)*
+        and_cond:= not_cond (AND not_cond)*
+        not_cond:= NOT not_cond | atom_cond
+        atom_cond:= (condition) | comparison
+        comparison:= expr OP expr
+        expr:= IDENT | INT | STR
+    """
+
+    _SQL_TO_RA_OP = {
+        '=': '==',
+        '<>': '!=',
+        '!=': '!=',
+        '>=': '>=',
+        '<=': '<=',
+        '>': '>',
+        '<': '<',
+    }
+
+    def __init__(self, tokens: _TokenList) -> None:
+        self._tokens = tokens
+        self._pos = 0
+
+    # ── Low-level helpers ─────────────────────────────────────────────
+
+    def _peek(self) -> Optional[_Token]:
+        if self._pos >= len(self._tokens):
+            return None
+        return self._tokens[self._pos]
+
+    def _peek_tag(self) -> Optional[str]:
+        t = self._peek()
+        return t[0] if t else None
+
+    def _peek_is(self, tag: str, val: str) -> bool:
+        t = self._peek()
+        return t is not None and t == (tag, val)
+
+    def _consume(self) -> _Token:
+        if self._pos >= len(self._tokens):
+            raise SQLTranslationError("Unexpected end of SQL input")
+        tok = self._tokens[self._pos]
+        self._pos += 1
+        return tok
+
+    def _expect_kw(self, kw: str) -> None:
+        tag, val = self._consume()
+        if tag != 'KW' or val != kw:
+            raise SQLTranslationError(
+                f"Expected SQL keyword '{kw}', got '{val}'"
+            )
+
+    # ── Grammar rules ─────────────────────────────────────────────────
+
+    def translate(self) -> str:
+        """Entry point: produce the full RA expression string."""
+        result = self._parse_select()
+        while self._peek_is('KW', 'UNION'):
+            self._consume()                      # consume UNION
+            if self._peek_is('KW', 'ALL'):
+                self._consume()                  # UNION ALL → same semantics
+            rhs = self._parse_select()
+            result = f"({result} ∪ {rhs})"
+        if self._peek() is not None:
+            _, val = self._peek()
+            raise SQLTranslationError(
+                f"Unexpected token '{val}' after end of query. "
+                "Did you mean to use UNION?"
+            )
+        return result
+
+    def _parse_select(self) -> str:
+        self._expect_kw('SELECT')
+
+        distinct = False
+        if self._peek_is('KW', 'DISTINCT'):
+            self._consume()
+            distinct = True
+
+        cols: Optional[List[str]] = self._parse_col_list()
+        self._expect_kw('FROM')
+        tables: List[str] = self._parse_table_list()
+
+        where_cond: Optional[str] = None
+        if self._peek_is('KW', 'WHERE'):
+            self._consume()
+            where_cond = self._parse_or_cond()
+
+        # Reject unsupported trailing clauses with a helpful message
+        t = self._peek()
+        if t is not None and t[0] == 'KW' and t[1] in _UNSUPPORTED_CLAUSES:
+            clause = _UNSUPPORTED_CLAUSES[t[1]]
+            raise SQLTranslationError(
+                f"SQL clause '{clause}' is not supported. "
+                "Supported syntax: SELECT [DISTINCT] cols FROM tables [WHERE cond]"
+            )
+
+        # Build RA expression bottom-up:
+        # 1. Cross product of all FROM tables (left-associative)
+        rel = self._build_cross_product(tables)
+        # 2. Selection (WHERE)
+        if where_cond is not None:
+            rel = f"σ[{where_cond}]({rel})"
+        # 3. Projection (SELECT cols; omitted for SELECT *)
+        if cols is not None:
+            rel = f"π[{', '.join(cols)}]({rel})"
+        # 4. Deduplication (DISTINCT)
+        if distinct:
+            rel = f"δ({rel})"
+
+        return rel
+
+    def _build_cross_product(self, tables: List[str]) -> str:
+        rel = tables[0]
+        for t in tables[1:]:
+            rel = f"({rel} × {t})"
+        return rel
+
+    def _parse_col_list(self) -> Optional[List[str]]:
+        """Returns None for SELECT *, or a list of column name strings."""
+        if self._peek_tag() == 'STAR':
+            self._consume()
+            return None
+        cols = [self._parse_col()]
+        while self._peek_tag() == 'COMMA':
+            self._consume()
+            cols.append(self._parse_col())
+        return cols
+
+    def _parse_col(self) -> str:
+        tag, val = self._consume()
+        if tag != 'IDENT':
+            raise SQLTranslationError(
+                f"Expected a column name in SELECT list, got '{val}'"
+            )
+        # Silently ignore optional AS alias
+        if self._peek_is('KW', 'AS'):
+            self._consume()
+            if self._peek_tag() == 'IDENT':
+                self._consume()
+        return val
+
+    def _parse_table_list(self) -> List[str]:
+        tables = [self._parse_table()]
+        while self._peek_tag() == 'COMMA':
+            self._consume()
+            tables.append(self._parse_table())
+        return tables
+
+    def _parse_table(self) -> str:
+        tag, val = self._consume()
+        if tag != 'IDENT':
+            raise SQLTranslationError(
+                f"Expected a table name in FROM clause, got '{val}'"
+            )
+        # Silently ignore optional AS alias
+        if self._peek_is('KW', 'AS'):
+            self._consume()
+            if self._peek_tag() == 'IDENT':
+                self._consume()
+        return val
+
+    # ── Condition parsing ─────────────────────────────────────────────
+
+    def _parse_or_cond(self) -> str:
+        result = self._parse_and_cond()
+        while self._peek_is('KW', 'OR'):
+            self._consume()
+            rhs = self._parse_and_cond()
+            result = f"{result} \\/ {rhs}"
+        return result
+
+    def _parse_and_cond(self) -> str:
+        result = self._parse_not_cond()
+        while self._peek_is('KW', 'AND'):
+            self._consume()
+            rhs = self._parse_not_cond()
+            result = f"{result} /\\ {rhs}"
+        return result
+
+    def _parse_not_cond(self) -> str:
+        if self._peek_is('KW', 'NOT'):
+            self._consume()
+            inner = self._parse_not_cond()
+            return f"~({inner})"
+        return self._parse_atom_cond()
+
+    def _parse_atom_cond(self) -> str:
+        if self._peek_tag() == 'OPAR':
+            self._consume()
+            inner = self._parse_or_cond()
+            if self._peek_tag() != 'CPAR':
+                raise SQLTranslationError(
+                    "Expected closing ')' to match '(' in condition"
+                )
+            self._consume()
+            return f"({inner})"
+        return self._parse_comparison()
+
+    def _parse_comparison(self) -> str:
+        lhs = self._parse_atom_expr()
+        op_tok = self._peek()
+        if op_tok is None or op_tok[0] != 'OP':
+            raise SQLTranslationError(
+                f"Expected a comparison operator (=, <>, >=, …) after '{lhs}', "
+                f"got '{op_tok[1] if op_tok else 'end of input'}'"
+            )
+        _, sql_op = self._consume()
+        if sql_op not in self._SQL_TO_RA_OP:
+            raise SQLTranslationError(
+                f"Unrecognised comparison operator '{sql_op}'"
+            )
+        rhs = self._parse_atom_expr()
+        return f"{lhs} {self._SQL_TO_RA_OP[sql_op]} {rhs}"
+
+    def _parse_atom_expr(self) -> str:
+        tag, val = self._consume()
+        if tag in ('IDENT', 'INT', 'STR'):
+            return val
+        raise SQLTranslationError(
+            f"Expected a column name or literal value, got '{val}'"
+        )
+
+
+def sql_to_ra(sql: str) -> str:
+    """
+    Translate a SQL SELECT query into a relational algebra expression string.
+
+    The returned string is compatible with ``src.parser.parse()``.
+
+    Parameters
+    ----------
+    sql : str
+        A SQL query using the supported subset (see module docstring).
+
+    Returns
+    -------
+    str
+        Relational algebra expression string, e.g.
+        ``"δ(π[Name](σ[Dept == 'Eng'](Emp)))"``
+
+    Raises
+    ------
+    SQLTranslationError
+        If the query uses an unsupported SQL construct or has a syntax error.
+
+    Examples
+    --------
+    >>> sql_to_ra("SELECT DISTINCT Name FROM Emp WHERE Dept = 'Eng'")
+    "δ(π[Name](σ[Dept == 'Eng'](Emp)))"
+
+    >>> sql_to_ra("SELECT A FROM R UNION SELECT A FROM S")
+    '(π[A](R) ∪ π[A](S))'
+    """
+    tokens = _tokenize(sql.strip())
+    if not tokens:
+        raise SQLTranslationError("Empty SQL query")
+    translator = _Translator(tokens)
+    return translator.translate()
