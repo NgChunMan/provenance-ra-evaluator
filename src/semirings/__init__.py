@@ -1,10 +1,10 @@
 """
-provenance_dedup/semirings/__init__.py
+src/semirings/__init__.py
 Re-exports all public semiring objects for convenient importing.
 
 Usage:
-    from provenance_dedup.semirings import BOOL_SR, NAT_SR, POLY_SR
-    from provenance_dedup.semirings import BooleanSemiring, CountingSemiring, PolynomialSemiring
+    from src.semirings import BOOL_SR, NAT_SR, POLY_SR
+    from src.semirings import BooleanSemiring, CountingSemiring, PolynomialSemiring
 """
 
 from .base       import Semiring

@@ -8,10 +8,10 @@ also present in tests/test_deduplication.py for use with pytest.
 
 import sys
 
-from provenance_dedup.semirings import BOOL_SR, NAT_SR, POLY_SR, Polynomial
-from provenance_dedup.relation  import KRelation
-from provenance_dedup.operators.deduplication import deduplication
-from provenance_dedup.strategies import DedupStrategy
+from src.semirings import BOOL_SR, NAT_SR, POLY_SR, Polynomial
+from src.relation  import KRelation
+from src.operators.deduplication import deduplication
+from src.strategies import DedupStrategy
 from benchmarks.bench_deduplication import main as run_benchmarks
 
 

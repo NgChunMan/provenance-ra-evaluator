@@ -1,7 +1,7 @@
 """
 Deduplication strategy enum.
 
-Two strategies implement the δ operator differently.  The choice
+Two strategies implement the δ operator differently. The choice
 determines how much provenance information survives deduplication.
 
 EXISTENCE

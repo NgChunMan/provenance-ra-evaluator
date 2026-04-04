@@ -44,9 +44,9 @@ from __future__ import annotations
 
 from typing import FrozenSet
 
-from provenance_dedup.relation.k_relation import KRelation
-from provenance_dedup.semirings.polynomial import Polynomial
-from provenance_dedup.strategies import DedupStrategy
+from src.relation.k_relation import KRelation
+from src.semirings.polynomial import Polynomial
+from src.strategies import DedupStrategy
 
 
 def deduplication(
@@ -88,7 +88,7 @@ def deduplication(
         objects (e.g. when using CountingSemiring or BooleanSemiring).
     """
     semiring = relation.semiring
-    result   = KRelation(relation.schema, semiring)
+    result = KRelation(relation.schema, semiring)
 
     for row_key, ann in relation.items():
 

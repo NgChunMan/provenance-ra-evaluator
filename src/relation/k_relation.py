@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterator, List, Tuple
 
-from provenance_dedup.semirings.base import Semiring
+from src.semirings.base import Semiring
 
 
 class KRelation:
@@ -89,6 +89,7 @@ class KRelation:
             1 for v in self._data.values()
             if not self.semiring.is_zero(v)
         )
+
 
     def pretty(self, title: str = "") -> str:
         """Return a formatted multi-line string of the relation."""

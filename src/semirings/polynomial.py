@@ -3,8 +3,8 @@ Polynomial provenance semiring  ℕ[X].
 
 Three classes:
 
-    Monomial          — immutable product of variables: t1² · t3
-    Polynomial        — finite formal sum: 2t1² + t1·t3 + t2²
+    Monomial — immutable product of variables: t1² · t3
+    Polynomial — finite formal sum: 2t1² + t1·t3 + t2²
     PolynomialSemiring — Semiring implementation wrapping Polynomial arithmetic
 
 Provenance interpretation
@@ -279,7 +279,7 @@ class PolynomialSemiring(Semiring):
     delegate to Polynomial.add / Polynomial.multiply.
     """
     def zero(self) -> Polynomial:   return Polynomial.zero()
-    def one(self)  -> Polynomial:   return Polynomial.one()
+    def one(self) -> Polynomial:   return Polynomial.one()
     def add(self, a: Polynomial, b: Polynomial) -> Polynomial: return a.add(b)
     def mul(self, a: Polynomial, b: Polynomial) -> Polynomial: return a.multiply(b)
     def is_zero(self, a: Polynomial) -> bool: return a.is_zero()

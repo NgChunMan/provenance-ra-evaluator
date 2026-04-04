@@ -29,15 +29,20 @@ are reported.  The overhead columns show the ratio relative to NO_PROV
 
 import gc
 import random
+import sys
 import time
 import tracemalloc
+from pathlib import Path
 from typing import Any, List, Tuple
 
-from provenance_dedup.semirings import NAT_SR, POLY_SR
-from provenance_dedup.semirings.polynomial import Monomial, Polynomial
-from provenance_dedup.relation  import KRelation
-from provenance_dedup.operators.deduplication import deduplication
-from provenance_dedup.strategies import DedupStrategy
+# Ensure the project root is on sys.path when running this file directly
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.semirings import POLY_SR, NAT_SR
+from src.semirings.polynomial import Monomial, Polynomial
+from src.relation  import KRelation
+from src.operators.deduplication import deduplication
+from src.strategies import DedupStrategy
 
 
 # ──────────────────────────────────────────────────────────────────────
