@@ -1,4 +1,4 @@
-# provenance-ra
+# provenance-ra-evaluator
 
 A Python library implementing **provenance-aware relational algebra** using the K-relations framework. Relational operators (σ, π, ×, ⊎, δ) are evaluated over relations annotated with semiring elements, so provenance information flows automatically through query pipelines.
 
@@ -125,4 +125,3 @@ requirements.txt
 ## References
 
 - Green, Karvounarakis & Tannen. _Provenance Semirings._ PODS 2007.
-- Buneman, Khanna & Tan. _Why and Where: A Characterization of Data Provenance._ ICDT 2001.
