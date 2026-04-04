@@ -53,5 +53,32 @@ def projection(
     ValueError
         If any attribute in `attributes` is not in relation.schema.
     """
-    raise NotImplementedError
+    # ── validate requested attributes ──────────────────────────────────
+    schema_set = set(relation.schema)
+    unknown = [a for a in attributes if a not in schema_set]
+    if unknown:
+        raise ValueError(
+            f"Attribute(s) {unknown!r} not found in schema {relation.schema!r}"
+        )
+
+    semiring = relation.semiring
+    result = KRelation(attributes, semiring)
+
+    # ── precompute index positions once ────────────────────────────────
+    indices = [relation.schema.index(a) for a in attributes]
+
+    for row_key, ann in relation.items():
+
+        # ── skip absent tuples ──────────────────────────────────────────
+        if semiring.is_zero(ann):
+            continue
+
+        # ── build projected tuple and reconstruct as dict ───────────────
+        projected_key = tuple(row_key[i] for i in indices)
+        projected_row = dict(zip(attributes, projected_key))
+
+        # ── accumulate via semiring.add() (insert handles collisions) ───
+        result.insert(projected_row, ann)
+
+    return result
 
