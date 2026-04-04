@@ -1,14 +1,5 @@
 """
 CSV loader: reads CSV files from data/ into KRelation objects.
-
-File format
------------
-The CSV files follow the convention established by the cs4221 framework:
-
-    Row 1 — column type hints (e.g. INT, TEXT)
-    Row 2 — column names (the schema header)
-    Row 3+ — data rows
-
 Each loaded tuple receives annotation semiring.one(), meaning it is
 present exactly once before any operators are applied.
 """
@@ -52,5 +43,35 @@ def load_csv(
     ValueError
         If the file has fewer than two rows (no header or no data).
     """
-    raise NotImplementedError
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise FileNotFoundError(f"CSV file not found: {filepath}")
+
+    with open(filepath, "r", encoding="utf-8-sig") as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    if len(lines) < 2:
+        raise ValueError(
+            f"CSV file must have at least a type row and a header row; "
+            f"got {len(lines)} line(s)"
+        )
+
+    type_hints = [t.strip() for t in lines[0].split(",")]
+
+    schema = [col.strip() for col in lines[1].split(",")]
+
+    rel = KRelation(schema, semiring)
+
+    # Row 2+: data rows
+    for line in lines[2:]:
+        values = [v.strip() for v in line.split(",")]
+        row = {}
+        for col, val, hint in zip(schema, values, type_hints):
+            if hint == "INT":
+                row[col] = int(val)
+            else:
+                row[col] = val
+        rel.insert(row)
+
+    return rel
 
