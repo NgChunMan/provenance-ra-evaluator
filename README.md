@@ -1,27 +1,35 @@
-# provenance-dedup
+# provenance-ra
 
-A Python library that implements the **deduplication operator (δ)** from provenance-aware relational algebra. It lets you deduplicate annotated relations (K-relations) while choosing how much provenance information to retain.
+A Python library implementing **provenance-aware relational algebra** using the K-relations framework. Relational operators (σ, π, ×, ⊎, δ) are evaluated over relations annotated with semiring elements, so provenance information flows automatically through query pipelines.
 
 ---
 
 ## What is this?
 
-In standard databases, `SELECT DISTINCT` simply removes duplicate rows. In **provenance-aware** databases, every row carries an annotation (drawn from a semiring) that tracks _how_ and _how many times_ it was derived. Naively deduplicating discards that information.
+In standard databases, operators like `SELECT`, `PROJECT`, and `DISTINCT` discard information about _where_ results came from. In **provenance-aware** databases, every tuple carries an annotation drawn from a semiring that tracks how and how many times it was derived.
 
-This library implements two strategies that let you control the trade-off:
+This library implements five relational algebra operators over K-relations, all parameterised by a semiring. Swapping the semiring changes the provenance semantics without touching the operator logic.
 
-| Strategy    | What the annotation becomes           | Provenance kept                                   |
-| ----------- | ------------------------------------- | ------------------------------------------------- |
-| `EXISTENCE` | `1` (semiring identity)               | None — only presence recorded                     |
-| `LINEAGE`   | `frozenset` of contributing tuple IDs | Which input tuples contributed (_why-provenance_) |
+**Operators:**
+
+| Symbol | Operator      |
+| ------ | ------------- |
+| σ      | Selection     |
+| π      | Projection    |
+| ×      | Cross product |
+| ⊎      | Multiset sum  |
+| δ      | Deduplication |
 
 **Supported semirings:**
 
-| Semiring          | Python type  | Meaning                                                |
-| ----------------- | ------------ | ------------------------------------------------------ |
-| Boolean `𝔹`       | `bool`       | Set semantics — is the tuple present?                  |
-| Counting `ℕ`      | `int`        | Bag semantics — how many times does it appear?         |
-| Polynomial `K[x]` | `Polynomial` | Full provenance — tracks derivation paths symbolically |
+| Semiring                | Python type  | Meaning                                                          |
+| ----------------------- | ------------ | ---------------------------------------------------------------- |
+| Boolean `𝔹`             | `bool`       | Set semantics — is the tuple present?                            |
+| Boolean Function `𝔹[X]` | `BoolFunc`   | Provenance as a Boolean formula over tuple variables             |
+| Counting `ℕ`            | `int`        | Bag semantics — how many times does it appear?                   |
+| Polynomial `ℕ[X]`       | `Polynomial` | Full how-provenance — tracks derivation paths and multiplicities |
+
+> The Boolean and Boolean Function semirings are the primary focus of this project. The Counting and Polynomial semirings are explored as extensions that go beyond the project requirements, demonstrating the generality of the K-relations framework.
 
 ---
 
@@ -31,8 +39,8 @@ This library implements two strategies that let you control the trade-off:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/provenance-dedup.git
-cd provenance-dedup
+git clone https://github.com/your-username/provenance-ra.git
+cd provenance-ra
 
 # Create and activate a virtual environment
 python -m venv venv
@@ -58,33 +66,8 @@ python -m pytest tests/ -v
 Run only the benchmarks:
 
 ```bash
-python -m benchmarks.bench_deduplication
-```
-
----
-
-## Usage example
-
-```python
-from provenance_dedup.semirings import POLY_SR
-from provenance_dedup.semirings.polynomial import Polynomial
-from provenance_dedup.relation.k_relation import KRelation
-from provenance_dedup.operators.deduplication import deduplication
-from provenance_dedup.strategies import DedupStrategy
-
-# Build an annotated relation where each tuple has a polynomial annotation.
-# This annotation might come from a prior join or projection.
-rel = KRelation(["Name"], POLY_SR)
-t1, t2 = Polynomial.from_var("t1"), Polynomial.from_var("t2")
-rel._set_raw(("Alice",), t1.multiply(t1).add(t2))  # Alice → t1² + t2
-
-# EXISTENCE: forget provenance, just record that Alice is present
-out_existence = deduplication(rel, DedupStrategy.EXISTENCE)
-# Alice → Polynomial.one()  (i.e. 1)
-
-# LINEAGE: record which input tuple IDs contributed
-out_lineage = deduplication(rel, DedupStrategy.LINEAGE)
-# Alice → frozenset({'t1', 't2'})
+python benchmarks/bench_deduplication.py
+python benchmarks/bench_pipeline.py
 ```
 
 ---
@@ -92,23 +75,45 @@ out_lineage = deduplication(rel, DedupStrategy.LINEAGE)
 ## Project layout
 
 ```
-provenance_dedup/
+src/
 ├── semirings/
-│   ├── base.py         # Abstract Semiring interface
-│   ├── boolean.py      # Boolean semiring  (𝔹, ∨, ∧, False, True)
-│   ├── counting.py     # Counting semiring (ℕ, +, ×, 0, 1)
-│   └── polynomial.py   # Polynomial semiring + Monomial/Polynomial types
+│   ├── base.py            # Abstract Semiring interface
+│   ├── boolean.py         # Boolean semiring  (𝔹, ∨, ∧, False, True)
+│   ├── counting.py        # Counting semiring (ℕ, +, ×, 0, 1)
+│   └── polynomial.py      # Polynomial semiring + Monomial/Polynomial types
 ├── relation/
-│   └── k_relation.py   # KRelation — an annotated table
+│   └── k_relation.py      # KRelation — an annotated table
 ├── operators/
-│   └── deduplication.py  # δ operator implementation
-└── strategies.py       # DedupStrategy enum (EXISTENCE, LINEAGE)
+│   ├── selection.py       # σ — filter rows by predicate
+│   ├── projection.py      # π — drop columns, merge annotations
+│   ├── cross_product.py   # × — cartesian product
+│   ├── multiset_sum.py    # ⊎ — union of two K-relations
+│   └── deduplication.py   # δ — collapse annotations to semiring.one()
+├── parser/
+│   ├── tokenizer.py       # Lexer: expression string → token list
+│   ├── grammar.py         # Grammar rules and expression tree nodes
+│   └── parser.py          # Token list → expression tree
+├── io/
+│   └── csv_loader.py      # Load CSV files into KRelation objects
+├── strategies.py          # DedupStrategy enum (EXISTENCE, LINEAGE)
+└── evaluator.py           # Walk expression tree, dispatch to operators
 
 tests/
-└── test_deduplication.py   # 9 correctness tests, 19 assertions
+├── unit/
+│   ├── test_semirings.py
+│   ├── test_k_relation.py
+│   ├── test_selection.py
+│   ├── test_projection.py
+│   ├── test_cross_product.py
+│   ├── test_multiset_sum.py
+│   └── test_deduplication.py
+└── integration/
+    ├── test_parser.py
+    └── test_pipeline.py   # End-to-end: query string → KRelation result
 
 benchmarks/
-└── bench_deduplication.py  # Time and memory benchmarks
+├── bench_deduplication.py # δ operator in isolation (time + memory)
+└── bench_pipeline.py      # Full multi-operator pipeline benchmark
 
 main.py          # Worked example + inline tests + benchmarks
 README.md
@@ -117,18 +122,7 @@ requirements.txt
 
 ---
 
-## Key concepts
+## References
 
-- **K-relation:** A relation where every tuple is annotated with an element from a semiring K, generalising both set and bag semantics.
-- **Semiring:** An algebraic structure `(K, +, ·, 0, 1)` — addition models union/projection, multiplication models joins.
-- **δ (deduplication):** Maps a K-relation to one where each present tuple's annotation is replaced according to the chosen strategy.
-
----
-
-## Running tests
-
-```bash
-python -m pytest tests/ -v
-```
-
-9 tests cover: polynomial annotations, Boolean semiring, counting semiring, zero-annotation exclusion, idempotence, and error handling.
+- Green, Karvounarakis & Tannen. _Provenance Semirings._ PODS 2007.
+- Buneman, Khanna & Tan. _Why and Where: A Characterization of Data Provenance._ ICDT 2001.
