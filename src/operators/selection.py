@@ -52,5 +52,32 @@ def selection(
         holds, with annotations unchanged.
         The original relation is not modified.
     """
-    raise NotImplementedError
+    semiring = relation.semiring
+    result = KRelation(relation.schema, semiring)
+
+    for row_key, ann in relation.items():
+
+        # ── skip absent tuples ────────────────────────────────────────
+        if semiring.is_zero(ann):
+            continue
+
+        # ── reconstruct row dict for predicate evaluation ─────────────
+        #
+        # The stored key is a positional tuple aligned with relation.schema.
+        # We rebuild the column→value mapping so the predicate can refer
+        # to columns by name rather than position.
+
+        row_dict: Dict[str, Any] = dict(zip(relation.schema, row_key))
+
+        # ── apply predicate ───────────────────────────────────────────
+        #
+        # If θ(t) holds, copy the annotation unchanged — selection never
+        # modifies annotations, only gates on the predicate.
+        # If θ(t) fails, the tuple is absent from the output (equivalent
+        # to multiplying by semiring.zero(), which annihilates any value).
+
+        if predicate(row_dict):
+            result._data[row_key] = ann
+
+    return result
 
