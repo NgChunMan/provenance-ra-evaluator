@@ -1,6 +1,4 @@
 """
-Correctness tests for the δ (deduplication) operator.
-
 Each test corresponds to a mathematically verifiable property of the
 operator.
 
@@ -83,23 +81,6 @@ from src.operators.deduplication import deduplication
 from src.strategies import DedupStrategy
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Shared fixture: the worked example
-#
-# Query: δ( π_Name( R ⋈_Dept R ) )
-#
-# Input R:
-#   (Alice, Eng) → t1
-#   (Alice, HR)  → t2
-#   (Bob,   Eng) → t3
-#
-# After self-join ⋈_Dept and projection π(Name_L) the annotations are:
-#   Alice → t1² + t1·t3 + t2²
-#   Bob   → t1·t3 + t3²
-#
-# These polynomials are the input to δ in TC-1 and TC-2.
-# ──────────────────────────────────────────────────────────────────────
-
 def _build_worked_example_relation() -> KRelation:
     """Return the pre-dedup KRelation from the worked example."""
     t1 = Polynomial.from_var("t1")
@@ -107,17 +88,13 @@ def _build_worked_example_relation() -> KRelation:
     t3 = Polynomial.from_var("t3")
 
     alice_poly = t1.multiply(t1).add(t1.multiply(t3)).add(t2.multiply(t2))
-    bob_poly   = t1.multiply(t3).add(t3.multiply(t3))
+    bob_poly = t1.multiply(t3).add(t3.multiply(t3))
 
     rel = KRelation(["Name"], POLY_SR)
     rel._set_raw(("Alice",), alice_poly)
-    rel._set_raw(("Bob",),   bob_poly)
+    rel._set_raw(("Bob",), bob_poly)
     return rel
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TC-1  EXISTENCE collapses polynomial annotations to Polynomial.one()
-# ──────────────────────────────────────────────────────────────────────
 
 class TestExistenceCollapseToOne:
     """
@@ -126,9 +103,9 @@ class TestExistenceCollapseToOne:
     """
 
     def setup_method(self):
-        self.rel    = _build_worked_example_relation()
+        self.rel = _build_worked_example_relation()
         self.result = deduplication(self.rel, DedupStrategy.EXISTENCE)
-        self.one    = Polynomial.one()
+        self.one = Polynomial.one()
 
     def test_alice_annotation_is_one(self):
         assert self.result._data.get(("Alice",)) == self.one, (
@@ -145,10 +122,6 @@ class TestExistenceCollapseToOne:
             "Deduplication must not add or remove tuples from the support"
         )
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TC-2  LINEAGE extracts correct variable sets (the worked example)
-# ──────────────────────────────────────────────────────────────────────
 
 class TestLineageExtractsCorrectVariableSets:
     """
@@ -167,7 +140,7 @@ class TestLineageExtractsCorrectVariableSets:
     """
 
     def setup_method(self):
-        self.rel    = _build_worked_example_relation()
+        self.rel = _build_worked_example_relation()
         self.result = deduplication(self.rel, DedupStrategy.LINEAGE)
 
     def test_alice_why_set_is_all_three_vars(self):
@@ -189,10 +162,6 @@ class TestLineageExtractsCorrectVariableSets:
             f"Bob's why-set should be {{t1,t3}}, got {bob_why}"
         )
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TC-3  Zero-annotation tuples are excluded from both strategies
-# ──────────────────────────────────────────────────────────────────────
 
 class TestZeroAnnotationTuplesAreExcluded:
     """
@@ -218,10 +187,6 @@ class TestZeroAnnotationTuplesAreExcluded:
         )
 
 
-# ──────────────────────────────────────────────────────────────────────
-# TC-4  Boolean semiring — EXISTENCE is a no-op
-# ──────────────────────────────────────────────────────────────────────
-
 class TestBooleanSemiringExistenceIsNoOp:
     """
     In 𝔹, semiring.one() = True.
@@ -232,7 +197,7 @@ class TestBooleanSemiringExistenceIsNoOp:
     def setup_method(self):
         self.rel = KRelation(["Name"], BOOL_SR)
         self.rel._set_raw(("Alice",), True)
-        self.rel._set_raw(("Bob",),   True)
+        self.rel._set_raw(("Bob",), True)
         self.result = deduplication(self.rel, DedupStrategy.EXISTENCE)
 
     def test_alice_stays_true(self):
@@ -241,10 +206,6 @@ class TestBooleanSemiringExistenceIsNoOp:
     def test_bob_stays_true(self):
         assert self.result._data.get(("Bob",)) is True
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TC-5  Counting semiring — EXISTENCE discards multiplicity
-# ──────────────────────────────────────────────────────────────────────
 
 class TestCountingSemiringExistenceDiscardsMultiplicity:
     """
@@ -256,7 +217,7 @@ class TestCountingSemiringExistenceDiscardsMultiplicity:
     def setup_method(self):
         self.rel = KRelation(["Name"], NAT_SR)
         self.rel._set_raw(("Alice",), 42)
-        self.rel._set_raw(("Bob",),    7)
+        self.rel._set_raw(("Bob",), 7)
         self.result = deduplication(self.rel, DedupStrategy.EXISTENCE)
 
     def test_alice_42_becomes_1(self):
@@ -270,10 +231,6 @@ class TestCountingSemiringExistenceDiscardsMultiplicity:
         )
 
 
-# ──────────────────────────────────────────────────────────────────────
-# TC-6  Idempotence: δ(δ(R)) == δ(R) for EXISTENCE
-# ──────────────────────────────────────────────────────────────────────
-
 class TestIdempotence:
     """
     After the first δ every annotation is Polynomial.one().
@@ -283,10 +240,10 @@ class TestIdempotence:
     """
 
     def setup_method(self):
-        rel          = _build_worked_example_relation()
-        self.r1      = deduplication(rel, DedupStrategy.EXISTENCE)
+        rel = _build_worked_example_relation()
+        self.r1 = deduplication(rel, DedupStrategy.EXISTENCE)
         self.r1_again = deduplication(self.r1, DedupStrategy.EXISTENCE)
-        self.one     = Polynomial.one()
+        self.one = Polynomial.one()
 
     def test_alice_unchanged_after_second_dedup(self):
         assert self.r1_again._data.get(("Alice",)) == self.one
@@ -294,10 +251,6 @@ class TestIdempotence:
     def test_bob_unchanged_after_second_dedup(self):
         assert self.r1_again._data.get(("Bob",)) == self.one
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TC-7  Single-variable polynomial (minimal nontrivial case)
-# ──────────────────────────────────────────────────────────────────────
 
 class TestSingleVariablePolynomial:
     """
@@ -322,10 +275,6 @@ class TestSingleVariablePolynomial:
         )
 
 
-# ──────────────────────────────────────────────────────────────────────
-# TC-8  LINEAGE raises TypeError for non-Polynomial annotations
-# ──────────────────────────────────────────────────────────────────────
-
 class TestLineageTypeErrorOnNonPolynomial:
     """
     LINEAGE needs to call ann.variables(), which only exists on Polynomial.
@@ -339,10 +288,6 @@ class TestLineageTypeErrorOnNonPolynomial:
         with pytest.raises(TypeError):
             deduplication(rel, DedupStrategy.LINEAGE)
 
-
-# ──────────────────────────────────────────────────────────────────────
-# TC-9  Empty relation → empty result for both strategies
-# ──────────────────────────────────────────────────────────────────────
 
 class TestEmptyRelation:
     """
