@@ -2,4 +2,4 @@ __pycache__/
 .pytest_cache/
 venv/
 Project Outlines.pdf
-data/
+data/A01_data
