@@ -115,38 +115,38 @@ class TestDuckDBLoader:
         assert tables['nation'].support_size() == 25
         assert tables['region'].support_size() == 5
 
-    def test_date_columns_are_strings(self):
-        """Date columns (l_shipdate, o_orderdate) are ISO-format strings."""
+    def test_date_columns_are_dates(self):
+        """Date columns (l_shipdate, o_orderdate) are datetime.date objects."""
         from src.io.tpch_loader import load_tpch_from_duckdb
         tables = load_tpch_from_duckdb(sf=0.001, semiring=BOOL_SR, limit=1)
         orders = tables['orders']
         first = next(iter(orders._data))
         row = dict(zip(orders.schema, first))
-        assert isinstance(row['o_orderdate'], str), "o_orderdate should be a str"
-        # Must be parseable as YYYY-MM-DD
         from datetime import date
-        date.fromisoformat(row['o_orderdate'])
+        assert isinstance(row['o_orderdate'], date), "o_orderdate should be a datetime.date"
 
     def test_integer_columns_typed(self):
-        """l_quantity and orderkey columns are Python int."""
+        """Key and linenumber columns are Python int; l_quantity is Decimal."""
         from src.io.tpch_loader import load_tpch_from_duckdb
+        from decimal import Decimal
         tables = load_tpch_from_duckdb(sf=0.001, semiring=BOOL_SR, limit=1)
         li = tables['lineitem']
         first = next(iter(li._data))
         row = dict(zip(li.schema, first))
         assert isinstance(row['l_orderkey'], int)
-        assert isinstance(row['l_quantity'], int)
+        assert isinstance(row['l_quantity'], Decimal)
         assert isinstance(row['l_partkey'], int)
 
-    def test_decimal_monetary_columns_are_strings(self):
-        """Monetary DECIMAL columns (extendedprice, totalprice) are str."""
+    def test_decimal_monetary_columns_are_decimals(self):
+        """Monetary DECIMAL columns (extendedprice, discount) are Decimal."""
         from src.io.tpch_loader import load_tpch_from_duckdb
+        from decimal import Decimal
         tables = load_tpch_from_duckdb(sf=0.001, semiring=BOOL_SR, limit=1)
         li = tables['lineitem']
         first = next(iter(li._data))
         row = dict(zip(li.schema, first))
-        assert isinstance(row['l_extendedprice'], str)
-        assert isinstance(row['l_discount'], str)
+        assert isinstance(row['l_extendedprice'], Decimal)
+        assert isinstance(row['l_discount'], Decimal)
 
     def test_limit_parameter(self):
         """limit= caps rows per table."""

@@ -10,6 +10,8 @@ types and recursively evaluates sub-expressions.
 from __future__ import annotations
 
 import operator as op
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict
 
 from src.semirings.base import Semiring
@@ -36,14 +38,14 @@ _SUPPORTED = (
 
 # Maps each unsupported grammar node to a human-readable (symbol, name) pair.
 _UNSUPPORTED_OPS = {
-    Rename: ("ρ",  "rename"),
-    Group: ("ɣ",  "group-by / aggregation"),
-    Div: ("÷",  "division"),
-    Inner: ("⨝",  "inner join"),
-    Outer: ("⟕",  "left outer join"),
-    Anti: ("⊳",  "anti join"),
-    Intersect: ("∩",  "intersection"),
-    Minus: ("-",  "set difference"),
+    Rename: ("ρ", "rename"),
+    Group: ("ɣ", "group-by / aggregation"),
+    Div: ("÷", "division"),
+    Inner: ("⨝", "inner join"),
+    Outer: ("⟕", "left outer join"),
+    Anti: ("⊳", "anti join"),
+    Intersect: ("∩", "intersection"),
+    Minus: ("-", "set difference"),
 }
 
 
@@ -72,9 +74,97 @@ _CMP_OPS: Dict[str, Callable] = {
     "!=": op.ne,
     ">=": op.ge,
     "<=": op.le,
-    ">":  op.gt,
-    "<":  op.lt,
+    ">": op.gt,
+    "<": op.lt,
 }
+
+
+def _coerce_pair(a: Any, b: Any):
+    """
+    Coerce *a* and *b* to compatible types for comparison.
+
+    Rules (applied in order):
+    - If both are already the same type → return as-is.
+    - date vs str → parse the str as ISO date.
+    - Decimal vs int → promote the int to Decimal.
+    - Decimal vs str → parse the str as Decimal.
+    - int vs str → try int(str), fall back to identity.
+    """
+    if type(a) is type(b):
+        return a, b
+
+    # date <-> str
+    if isinstance(a, date) and isinstance(b, str):
+        return a, date.fromisoformat(b)
+    if isinstance(a, str) and isinstance(b, date):
+        return date.fromisoformat(a), b
+
+    # Decimal <-> int
+    if isinstance(a, Decimal) and isinstance(b, int):
+        return a, Decimal(b)
+    if isinstance(a, int) and isinstance(b, Decimal):
+        return Decimal(a), b
+
+    # Decimal <-> str
+    if isinstance(a, Decimal) and isinstance(b, str):
+        try:
+            return a, Decimal(b)
+        except InvalidOperation:
+            return a, b
+    if isinstance(a, str) and isinstance(b, Decimal):
+        try:
+            return Decimal(a), b
+        except InvalidOperation:
+            return a, b
+
+    # int <-> str (e.g. parsed literal vs loaded column)
+    if isinstance(a, int) and isinstance(b, str):
+        try:
+            return a, int(b)
+        except ValueError:
+            return a, b
+    if isinstance(a, str) and isinstance(b, int):
+        try:
+            return int(a), b
+        except ValueError:
+            return a, b
+
+    return a, b
+
+
+def _coerced_cmp(cmp_fn: Callable) -> Callable:
+    """Wrap a comparison function with automatic type coercion."""
+    def _wrapper(a: Any, b: Any) -> bool:
+        ca, cb = _coerce_pair(a, b)
+        return cmp_fn(ca, cb)
+    return _wrapper
+
+
+def _try_parse_val(val: Any) -> Any:
+    """
+    Attempt to parse a raw literal value (from a Val AST node) into its
+    most specific Python type. Called once at predicate-build time so
+    that per-row coercion is avoided for the common Attr <op> Val case.
+
+    - ISO date string 'YYYY-MM-DD' → datetime.date
+    - Decimal-formatted string → Decimal
+    - Everything else → unchanged
+    """
+    if not isinstance(val, str):
+        return val
+    # Try ISO date first (cheap: fixed width, starts with a digit)
+    if len(val) == 10 and val[4] == '-' and val[7] == '-':
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            pass
+    # Try Decimal (only if it looks numeric)
+    if val and (val[0].isdigit() or (val[0] in '+-' and len(val) > 1)):
+        try:
+            return Decimal(val)
+        except InvalidOperation:
+            pass
+    return val
 
 
 def _build_atom_evaluator(node) -> Callable[[Dict[str, Any]], Any]:
@@ -117,19 +207,19 @@ def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
         A function that takes a row dict and returns True/False.
     """
     if isinstance(cond, Comp):
-        cmp_fn = _CMP_OPS[cond.op]
+        cmp_fn = _coerced_cmp(_CMP_OPS[cond.op])
         lhs = cond.lhs
         rhs = cond.rhs
 
         # Attr <op> Val
         if isinstance(lhs, Attr) and isinstance(rhs, Val):
             attr_name = lhs.attr
-            val = rhs.val
+            val = _try_parse_val(rhs.val)  # parsed once at build time
             return lambda row, _a=attr_name, _v=val, _f=cmp_fn: _f(row[_a], _v)
 
         # Val <op> Attr
         if isinstance(lhs, Val) and isinstance(rhs, Attr):
-            val = lhs.val
+            val = _try_parse_val(lhs.val)  # parsed once at build time
             attr_name = rhs.attr
             return lambda row, _v=val, _a=attr_name, _f=cmp_fn: _f(_v, row[_a])
 
@@ -165,17 +255,22 @@ def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
 
     if isinstance(cond, In):
         attr_name = cond.lhs.attr if isinstance(cond.lhs, Attr) else None
-        values = [v.val for v in cond.values if isinstance(v, Val)]
+        values = [_try_parse_val(v.val) for v in cond.values if isinstance(v, Val)]  # parsed once
         negated = cond.negated
+        _eq = _coerced_cmp(op.eq)
         if attr_name is not None:
-            return lambda row, _a=attr_name, _vs=values, _neg=negated: (
-                (row[_a] not in _vs) if _neg else (row[_a] in _vs)
-            )
+            def _in_pred(row, _a=attr_name, _vs=values, _neg=negated, _eq=_eq):
+                val = row[_a]
+                found = any(_eq(val, v) for v in _vs)
+                return not found if _neg else found
+            return _in_pred
         # Fallback: evaluate lhs dynamically
         lhs_pred = _build_atom_evaluator(cond.lhs)
-        return lambda row, _l=lhs_pred, _vs=values, _neg=negated: (
-            (_l(row) not in _vs) if _neg else (_l(row) in _vs)
-        )
+        def _in_pred_dyn(row, _l=lhs_pred, _vs=values, _neg=negated, _eq=_eq):
+            val = _l(row)
+            found = any(_eq(val, v) for v in _vs)
+            return not found if _neg else found
+        return _in_pred_dyn
 
     if isinstance(cond, Like):
         import re as _re
@@ -197,10 +292,19 @@ def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
 
     if isinstance(cond, Between):
         lhs_pred = _build_atom_evaluator(cond.lhs)
-        lo_pred = _build_atom_evaluator(cond.lo)
-        hi_pred = _build_atom_evaluator(cond.hi)
-        return lambda row, _l=lhs_pred, _lo=lo_pred, _hi=hi_pred: (
-            _lo(row) <= _l(row) <= _hi(row)
+        lo_pred  = _build_atom_evaluator(cond.lo)
+        hi_pred  = _build_atom_evaluator(cond.hi)
+        # Pre-parse constant bounds if they are Val nodes
+        lo_val = _try_parse_val(cond.lo.val) if isinstance(cond.lo, Val) else None
+        hi_val = _try_parse_val(cond.hi.val) if isinstance(cond.hi, Val) else None
+        _le = _coerced_cmp(op.le)
+        if lo_val is not None and hi_val is not None:
+            # Both bounds are constants — captured once, no per-row lo/hi evaluation
+            return lambda row, _l=lhs_pred, _lo=lo_val, _hi=hi_val, _le=_le: (
+                _le(_lo, _l(row)) and _le(_l(row), _hi)
+            )
+        return lambda row, _l=lhs_pred, _lo=lo_pred, _hi=hi_pred, _le=_le: (
+            _le(_lo(row), _l(row)) and _le(_l(row), _hi(row))
         )
 
     raise ValueError(f"Unsupported condition node: {type(cond).__name__}")
