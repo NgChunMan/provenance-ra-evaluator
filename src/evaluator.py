@@ -22,7 +22,7 @@ from src.operators.deduplication import deduplication
 from src.strategies import DedupStrategy
 from src.parser.grammar import (
     Select, Project, Dedup, Cross, Union, Table,
-    And, Or, Not, Comp, Attr, Val,
+    And, Or, Not, Comp, Attr, Val, In, Like, Between, Mod,
     Rename, Group, Div, Inner, Outer, Anti, Intersect, Minus,
 )
 
@@ -77,6 +77,31 @@ _CMP_OPS: Dict[str, Callable] = {
 }
 
 
+def _build_atom_evaluator(node) -> Callable[[Dict[str, Any]], Any]:
+    """Return a callable that extracts/computes an atom value from a row dict."""
+    if isinstance(node, Attr):
+        name = node.attr
+        return lambda row, _n=name: row[_n]
+    if isinstance(node, Val):
+        v = node.val
+        return lambda row, _v=v: _v
+    if isinstance(node, Mod):
+        lhs_fn = _build_atom_evaluator(node.lhs)
+        rhs_fn = _build_atom_evaluator(node.rhs)
+        return lambda row, _l=lhs_fn, _r=rhs_fn: _l(row) % _r(row)
+    raise ValueError(f"Cannot build atom evaluator for {type(node).__name__}")
+
+
+def _like_match(val: Any, pattern: Any, negated: bool) -> bool:
+    """Evaluate SQL LIKE match at runtime with a dynamic pattern."""
+    import re as _re
+    if val is None or pattern is None:
+        return False
+    regex_str = '^' + _re.escape(str(pattern)).replace('%', '.*').replace('_', '.') + '$'
+    result = bool(_re.match(regex_str, str(val)))
+    return not result if negated else result
+
+
 def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
     """
     Convert a condition AST node into a callable predicate.
@@ -119,6 +144,11 @@ def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
             result = cmp_fn(lhs.val, rhs.val)
             return lambda row, _r=result: _r
 
+        # Generic fallback for complex expressions (Mod, etc.)
+        lhs_fn = _build_atom_evaluator(lhs)
+        rhs_fn = _build_atom_evaluator(rhs)
+        return lambda row, _l=lhs_fn, _r=rhs_fn, _f=cmp_fn: _f(_l(row), _r(row))
+
     if isinstance(cond, And):
         pred_l = _build_predicate(cond.lhs)
         pred_r = _build_predicate(cond.rhs)
@@ -132,6 +162,46 @@ def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
     if isinstance(cond, Not):
         pred = _build_predicate(cond.arg)
         return lambda row, _p=pred: not _p(row)
+
+    if isinstance(cond, In):
+        attr_name = cond.lhs.attr if isinstance(cond.lhs, Attr) else None
+        values = [v.val for v in cond.values if isinstance(v, Val)]
+        negated = cond.negated
+        if attr_name is not None:
+            return lambda row, _a=attr_name, _vs=values, _neg=negated: (
+                (row[_a] not in _vs) if _neg else (row[_a] in _vs)
+            )
+        # Fallback: evaluate lhs dynamically
+        lhs_pred = _build_atom_evaluator(cond.lhs)
+        return lambda row, _l=lhs_pred, _vs=values, _neg=negated: (
+            (_l(row) not in _vs) if _neg else (_l(row) in _vs)
+        )
+
+    if isinstance(cond, Like):
+        import re as _re
+        lhs_pred = _build_atom_evaluator(cond.lhs)
+        pat_val = cond.pattern.val if isinstance(cond.pattern, Val) else None
+        negated = cond.negated
+        if pat_val is not None:
+            # Pre-compile regex from SQL LIKE pattern
+            regex_str = '^' + _re.escape(str(pat_val)).replace('%', '.*').replace('_', '.') + '$'
+            compiled = _re.compile(regex_str)
+            return lambda row, _l=lhs_pred, _r=compiled, _neg=negated: (
+                (not bool(_r.match(str(_l(row))))) if _neg else bool(_r.match(str(_l(row))))
+            )
+        # Dynamic pattern
+        pat_pred = _build_atom_evaluator(cond.pattern)
+        return lambda row, _l=lhs_pred, _p=pat_pred, _neg=negated: (
+            _like_match(_l(row), _p(row), _neg)
+        )
+
+    if isinstance(cond, Between):
+        lhs_pred = _build_atom_evaluator(cond.lhs)
+        lo_pred = _build_atom_evaluator(cond.lo)
+        hi_pred = _build_atom_evaluator(cond.hi)
+        return lambda row, _l=lhs_pred, _lo=lo_pred, _hi=hi_pred: (
+            _lo(row) <= _l(row) <= _hi(row)
+        )
 
     raise ValueError(f"Unsupported condition node: {type(cond).__name__}")
 
