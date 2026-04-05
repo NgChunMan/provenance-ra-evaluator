@@ -11,6 +11,11 @@ Supported SQL subset
 - ``UNION`` / ``UNION ALL`` (both map to multiset union ∪)
 - WHERE conditions: ``=``, ``<>``, ``!=``, ``>=``, ``<=``, ``>``, ``<``,
   ``AND``, ``OR``, ``NOT``, and parentheses for grouping
+- ``IN (val1, val2, ...)``, ``NOT IN (...)``
+- ``LIKE 'pattern'``, ``NOT LIKE 'pattern'`` (``%`` and ``_`` wildcards)
+- ``BETWEEN val1 AND val2``
+- ``expr % expr`` (modulo)
+- ``DATE 'YYYY-MM-DD'`` literals (treated as string comparisons)
 - Qualified column references: ``T.col``
 - Optional ``AS`` aliases on tables and columns (aliases are silently ignored)
 
@@ -63,6 +68,7 @@ _KEYWORDS = frozenset({
     # Supported
     'SELECT', 'DISTINCT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT',
     'UNION', 'ALL', 'AS',
+    'IN', 'LIKE', 'BETWEEN', 'DATE',
     # Recognised but unsupported — kept for clear error messages
     'GROUP', 'BY', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET',
     'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS', 'ON',
@@ -104,6 +110,7 @@ def _tokenize(sql: str) -> _TokenList:
     ``STAR``  ``*``
     ``OPAR``  ``(``
     ``CPAR``  ``)``
+    ``MOD``   ``%``
 
     Raises
     ------
@@ -146,6 +153,10 @@ def _tokenize(sql: str) -> _TokenList:
             continue
         if sql[i] == ',':
             tokens.append(('COMMA', ','))
+            i += 1
+            continue
+        if sql[i] == '%':
+            tokens.append(('MOD', '%'))
             i += 1
             continue
         if sql[i] == '*':
@@ -401,6 +412,13 @@ class _Translator:
 
     def _parse_not_cond(self) -> str:
         if self._peek_is('KW', 'NOT'):
+            # Peek ahead: NOT followed by IN or LIKE belongs to the
+            # comparison (e.g. "col NOT IN (...)"), not boolean negation.
+            next_pos = self._pos + 1
+            if next_pos < len(self._tokens):
+                next_tok = self._tokens[next_pos]
+                if next_tok == ('KW', 'IN') or next_tok == ('KW', 'LIKE'):
+                    return self._parse_atom_cond()
             self._consume()
             inner = self._parse_not_cond()
             return f"~({inner})"
@@ -420,6 +438,45 @@ class _Translator:
 
     def _parse_comparison(self) -> str:
         lhs = self._parse_atom_expr()
+
+        # Handle: expr IN (v1, v2, ...)
+        if self._peek_is('KW', 'IN'):
+            self._consume()
+            return self._parse_in_list(lhs, negated=False)
+
+        # Handle: expr NOT IN (...) / expr NOT LIKE pat
+        if self._peek_is('KW', 'NOT'):
+            next_pos = self._pos + 1
+            if next_pos < len(self._tokens):
+                next_tok = self._tokens[next_pos]
+                if next_tok == ('KW', 'IN'):
+                    self._consume()  # consume NOT
+                    self._consume()  # consume IN
+                    return self._parse_in_list(lhs, negated=True)
+                if next_tok == ('KW', 'LIKE'):
+                    self._consume()  # consume NOT
+                    self._consume()  # consume LIKE
+                    pat = self._parse_atom_expr()
+                    return f"{lhs} NOT LIKE {pat}"
+
+        # Handle: expr LIKE pattern
+        if self._peek_is('KW', 'LIKE'):
+            self._consume()
+            pat = self._parse_atom_expr()
+            return f"{lhs} LIKE {pat}"
+
+        # Handle: expr BETWEEN lo AND hi
+        if self._peek_is('KW', 'BETWEEN'):
+            self._consume()
+            lo = self._parse_atom_expr()
+            if not self._peek_is('KW', 'AND'):
+                raise SQLTranslationError(
+                    "Expected AND in BETWEEN ... AND ... expression"
+                )
+            self._consume()
+            hi = self._parse_atom_expr()
+            return f"{lhs} BETWEEN {lo} AND {hi}"
+
         op_tok = self._peek()
         if op_tok is None or op_tok[0] != 'OP':
             raise SQLTranslationError(
@@ -434,9 +491,44 @@ class _Translator:
         rhs = self._parse_atom_expr()
         return f"{lhs} {self._SQL_TO_RA_OP[sql_op]} {rhs}"
 
+    def _parse_in_list(self, lhs: str, negated: bool) -> str:
+        """Parse (v1, v2, ...) after IN keyword and emit RA IN expression."""
+        if self._peek_tag() != 'OPAR':
+            raise SQLTranslationError("Expected '(' after IN")
+        self._consume()
+        values = [self._parse_atom_expr()]
+        while self._peek_tag() == 'COMMA':
+            self._consume()
+            values.append(self._parse_atom_expr())
+        if self._peek_tag() != 'CPAR':
+            raise SQLTranslationError("Expected ')' to close IN list")
+        self._consume()
+        vals_str = ', '.join(values)
+        keyword = 'NOT IN' if negated else 'IN'
+        return f"{lhs} {keyword} ({vals_str})"
+
     def _parse_atom_expr(self) -> str:
+        # DATE 'xxxx-xx-xx' -> treat as string literal
+        if self._peek_is('KW', 'DATE'):
+            self._consume()
+            tag, val = self._consume()
+            if tag != 'STR':
+                raise SQLTranslationError(
+                    f"Expected a string literal after DATE, got '{val}'"
+                )
+            return val  # return as 'xxxx-xx-xx' string literal
+
         tag, val = self._consume()
         if tag in ('IDENT', 'INT', 'STR'):
+            # Check for modulo: IDENT % INT or INT % INT
+            if self._peek_tag() == 'MOD':
+                self._consume()  # consume %
+                rhs_tag, rhs_val = self._consume()
+                if rhs_tag not in ('IDENT', 'INT'):
+                    raise SQLTranslationError(
+                        f"Expected number or column after %, got '{rhs_val}'"
+                    )
+                return f"{val} % {rhs_val}"
             return val
         raise SQLTranslationError(
             f"Expected a column name or literal value, got '{val}'"
