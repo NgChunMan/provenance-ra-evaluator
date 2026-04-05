@@ -39,7 +39,7 @@ TC-32  Unrecognised character raises SQLTranslationError
 
 import pytest
 
-from src.sql_to_ra import sql_to_ra, SQLTranslationError
+from src.sql_to_ra import sql_to_ra, sql_to_ra_with_aliases, SQLTranslationError
 from src.parser import parse
 
 
@@ -173,9 +173,9 @@ def test_case_insensitive_keywords():
     assert sql_to_ra("SELECT DISTINCT * FROM R") == sql_to_ra("select distinct * from R")
 
 
-def test_as_alias_on_table_ignored():
-    """TC-22: AS alias on table name is silently ignored."""
-    assert sql_to_ra("SELECT * FROM Employees AS E") == "Employees"
+def test_as_alias_on_table():
+    """TC-22: AS alias on table name uses alias in RA expression."""
+    assert sql_to_ra("SELECT * FROM Employees AS E") == "E"
 
 
 def test_as_alias_on_column_ignored():
@@ -364,5 +364,62 @@ def test_combined_in_and_not_like():
           AND p_size IN (49, 14, 23)
     """
     ra = sql_to_ra(sql)
+    ast = parse(ra)
+    assert ast is not None
+
+
+# ── Table alias tests ─────────────────────────────────────────────────
+
+def test_bare_alias():
+    """Table alias without AS keyword: FROM nation n1."""
+    ra, aliases = sql_to_ra_with_aliases(
+        "SELECT * FROM nation n1 WHERE n1.n_name = 'FRANCE'"
+    )
+    assert aliases == {'n1': 'nation'}
+    assert 'n1' in ra
+
+
+def test_as_alias():
+    """Table alias with AS keyword: FROM nation AS n1."""
+    ra, aliases = sql_to_ra_with_aliases(
+        "SELECT * FROM nation AS n1 WHERE n1.n_name = 'FRANCE'"
+    )
+    assert aliases == {'n1': 'nation'}
+
+
+def test_self_join_aliases():
+    """Self-join: FROM nation n1, nation n2."""
+    ra, aliases = sql_to_ra_with_aliases(
+        "SELECT * FROM nation n1, nation n2 "
+        "WHERE n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY'"
+    )
+    assert aliases == {'n1': 'nation', 'n2': 'nation'}
+    assert '(n1 × n2)' in ra
+
+
+def test_no_alias_no_map():
+    """Non-aliased tables produce empty alias map."""
+    ra, aliases = sql_to_ra_with_aliases(
+        "SELECT * FROM customer, orders WHERE c_custkey = o_custkey"
+    )
+    assert aliases == {}
+
+
+def test_mixed_alias_and_plain():
+    """Mix of aliased and non-aliased tables."""
+    ra, aliases = sql_to_ra_with_aliases(
+        "SELECT * FROM supplier, nation n1 WHERE s_nationkey = n1.n_nationkey"
+    )
+    assert aliases == {'n1': 'nation'}
+    assert '(supplier × n1)' in ra
+
+
+def test_self_join_parseable():
+    """Self-join RA expression is parseable."""
+    ra, _ = sql_to_ra_with_aliases(
+        "SELECT DISTINCT n1.n_name, n2.n_name "
+        "FROM nation n1, nation n2 "
+        "WHERE n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY'"
+    )
     ast = parse(ra)
     assert ast is not None

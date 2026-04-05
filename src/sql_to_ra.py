@@ -16,6 +16,7 @@ Supported SQL subset
 - ``BETWEEN val1 AND val2``
 - ``expr % expr`` (modulo)
 - ``DATE 'YYYY-MM-DD'`` literals (treated as string comparisons)
+- ``DATE 'YYYY-MM-DD' + INTERVAL 'n' YEAR|MONTH|DAY`` (computed at translation time)
 - Qualified column references: ``T.col``
 - Optional ``AS`` aliases on tables and columns (aliases are silently ignored)
 
@@ -49,7 +50,7 @@ SQL → RA operator mapping
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # ── Public exception ──────────────────────────────────────────────────
@@ -69,6 +70,7 @@ _KEYWORDS = frozenset({
     'SELECT', 'DISTINCT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT',
     'UNION', 'ALL', 'AS',
     'IN', 'LIKE', 'BETWEEN', 'DATE',
+    'INTERVAL', 'YEAR', 'MONTH', 'DAY',
     # Recognised but unsupported — kept for clear error messages
     'GROUP', 'BY', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET',
     'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS', 'ON',
@@ -159,6 +161,16 @@ def _tokenize(sql: str) -> _TokenList:
             tokens.append(('MOD', '%'))
             i += 1
             continue
+        if sql[i] == '+':
+            tokens.append(('PLUS', '+'))
+            i += 1
+            continue
+        if sql[i] == '-':
+            # Distinguish minus from negative: only emit MINUS token
+            # (date arithmetic); negative numbers not supported yet.
+            tokens.append(('MINUS', '-'))
+            i += 1
+            continue
         if sql[i] == '*':
             tokens.append(('STAR', '*'))
             i += 1
@@ -216,6 +228,62 @@ def _tokenize(sql: str) -> _TokenList:
     return tokens
 
 
+# ── Date arithmetic helper ────────────────────────────────────────────
+
+def _date_add(date_lit: str, amount: int, unit: str) -> str:
+    """
+    Compute ``date_lit +/- amount unit`` and return new ``'YYYY-MM-DD'`` literal.
+
+    Parameters
+    ----------
+    date_lit : str
+        A date string literal like ``'1994-01-01'`` (with or without quotes).
+    amount : int
+        Number of units to add (negative to subtract).
+    unit : str
+        One of ``'YEAR'``, ``'MONTH'``, ``'DAY'``.
+
+    Returns
+    -------
+    str
+        New date literal with surrounding single quotes, e.g. ``"'1995-01-01'"``.
+    """
+    from datetime import date, timedelta
+
+    # Strip surrounding quotes
+    raw = date_lit.strip("'")
+    parts = raw.split("-")
+    if len(parts) != 3:
+        raise SQLTranslationError(
+            f"Cannot parse date literal: {date_lit}"
+        )
+    y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+
+    if unit == "YEAR":
+        y += amount
+    elif unit == "MONTH":
+        m += amount
+        # Normalise month overflow/underflow
+        while m > 12:
+            m -= 12
+            y += 1
+        while m < 1:
+            m += 12
+            y -= 1
+    elif unit == "DAY":
+        dt = date(y, m, d) + timedelta(days=amount)
+        return f"'{dt.isoformat()}'"
+    else:
+        raise SQLTranslationError(f"Unsupported interval unit: {unit}")
+
+    # Clamp day to max valid day for the resulting month
+    import calendar
+    max_day = calendar.monthrange(y, m)[1]
+    d = min(d, max_day)
+
+    return f"'{date(y, m, d).isoformat()}'"
+
+
 # ── Recursive-descent translator ──────────────────────────────────────
 
 class _Translator:
@@ -252,6 +320,7 @@ class _Translator:
     def __init__(self, tokens: _TokenList) -> None:
         self._tokens = tokens
         self._pos = 0
+        self._alias_map: Dict[str, str] = {}  # alias → real table name
 
     # ── Low-level helpers ─────────────────────────────────────────────
 
@@ -385,12 +454,25 @@ class _Translator:
             raise SQLTranslationError(
                 f"Expected a table name in FROM clause, got '{val}'"
             )
-        # Silently ignore optional AS alias
+        table_name = val
+        alias = val  # default: alias is the table name itself
+        # Check for optional alias: table_name alias or table_name AS alias
         if self._peek_is('KW', 'AS'):
             self._consume()
             if self._peek_tag() == 'IDENT':
-                self._consume()
-        return val
+                _, alias = self._consume()
+        elif (self._peek_tag() == 'IDENT'
+              and not self._peek_is('KW', 'WHERE')
+              and not self._peek_is('KW', 'GROUP')
+              and not self._peek_is('KW', 'ORDER')):
+            # Bare alias without AS: "nation n1"
+            # Only consume if next token is NOT a keyword we care about
+            next_tok = self._peek()
+            if next_tok and next_tok[0] == 'IDENT':
+                _, alias = self._consume()
+        if alias != table_name:
+            self._alias_map[alias] = table_name
+        return alias
 
     # ── Condition parsing ─────────────────────────────────────────────
 
@@ -508,7 +590,7 @@ class _Translator:
         return f"{lhs} {keyword} ({vals_str})"
 
     def _parse_atom_expr(self) -> str:
-        # DATE 'xxxx-xx-xx' -> treat as string literal
+        # DATE 'xxxx-xx-xx' [+/- INTERVAL 'n' YEAR|MONTH|DAY]
         if self._peek_is('KW', 'DATE'):
             self._consume()
             tag, val = self._consume()
@@ -516,7 +598,35 @@ class _Translator:
                 raise SQLTranslationError(
                     f"Expected a string literal after DATE, got '{val}'"
                 )
-            return val  # return as 'xxxx-xx-xx' string literal
+            date_str = val  # e.g. '1994-01-01'
+            # Handle optional date arithmetic: + interval '1' year
+            while self._peek_tag() in ('PLUS', 'MINUS'):
+                op_tag = self._consume()[1]  # '+' or '-'
+                if not self._peek_is('KW', 'INTERVAL'):
+                    raise SQLTranslationError(
+                        f"Expected INTERVAL after '{op_tag}' in date expression"
+                    )
+                self._consume()  # consume INTERVAL
+                amt_tag, amt_val = self._consume()
+                if amt_tag == 'STR':
+                    amt_val = amt_val.strip("'")
+                try:
+                    amount = int(amt_val)
+                except ValueError:
+                    raise SQLTranslationError(
+                        f"Expected integer interval amount, got '{amt_val}'"
+                    )
+                # Unit keyword
+                unit_tok = self._peek()
+                if unit_tok is None or unit_tok[0] != 'KW' or unit_tok[1] not in ('YEAR', 'MONTH', 'DAY'):
+                    raise SQLTranslationError(
+                        "Expected YEAR, MONTH, or DAY after interval amount"
+                    )
+                _, unit = self._consume()
+                date_str = _date_add(
+                    date_str, amount if op_tag == '+' else -amount, unit
+                )
+            return date_str  # return as 'YYYY-MM-DD' string literal
 
         tag, val = self._consume()
         if tag in ('IDENT', 'INT', 'STR'):
@@ -570,3 +680,22 @@ def sql_to_ra(sql: str) -> str:
         raise SQLTranslationError("Empty SQL query")
     translator = _Translator(tokens)
     return translator.translate()
+
+
+def sql_to_ra_with_aliases(sql: str) -> Tuple[str, Dict[str, str]]:
+    """
+    Like :func:`sql_to_ra` but also returns the alias→table mapping.
+
+    Returns
+    -------
+    (str, Dict[str, str])
+        The RA expression string and a dict mapping each alias to its
+        real table name.  Only aliases that differ from the table name
+        are included (e.g. ``{'n1': 'nation', 'n2': 'nation'}``).
+    """
+    tokens = _tokenize(sql.strip())
+    if not tokens:
+        raise SQLTranslationError("Empty SQL query")
+    translator = _Translator(tokens)
+    ra = translator.translate()
+    return ra, dict(translator._alias_map)
