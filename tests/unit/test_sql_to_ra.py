@@ -248,3 +248,121 @@ def test_unrecognised_character_raises():
     """TC-32: Unrecognised character raises SQLTranslationError."""
     with pytest.raises(SQLTranslationError, match="Unrecognised"):
         sql_to_ra("SELECT @ FROM R")
+
+
+# ── New predicate operators ───────────────────────────────────────────
+
+def test_in_list():
+    """IN (val1, val2, ...) translates to RA IN expression."""
+    result = sql_to_ra("SELECT * FROM R WHERE A IN (1, 2, 3)")
+    assert "IN" in result
+    assert "(1, 2, 3)" in result
+
+
+def test_not_in_list():
+    """NOT IN translates to RA NOT IN expression."""
+    result = sql_to_ra("SELECT * FROM R WHERE A NOT IN (1, 2)")
+    assert "NOT IN" in result
+    assert "(1, 2)" in result
+
+
+def test_in_string_values():
+    """IN with string values."""
+    result = sql_to_ra("SELECT * FROM R WHERE name IN ('foo', 'bar')")
+    assert "IN" in result
+    assert "'foo'" in result and "'bar'" in result
+
+
+def test_like():
+    """LIKE translates to RA LIKE expression."""
+    result = sql_to_ra("SELECT * FROM R WHERE name LIKE 'MEDIUM%'")
+    assert "LIKE" in result
+    assert "'MEDIUM%'" in result
+
+
+def test_not_like():
+    """NOT LIKE translates to RA NOT LIKE expression."""
+    result = sql_to_ra("SELECT * FROM R WHERE name NOT LIKE 'MEDIUM%'")
+    assert "NOT LIKE" in result
+
+
+def test_between():
+    """BETWEEN translates to RA BETWEEN expression."""
+    result = sql_to_ra("SELECT * FROM R WHERE A BETWEEN 1 AND 10")
+    assert "BETWEEN" in result
+    assert "AND" in result
+
+
+def test_modulo():
+    """% (modulo) in WHERE condition."""
+    result = sql_to_ra("SELECT * FROM R WHERE A%64 = 0")
+    assert "%" in result
+
+
+def test_date_literal():
+    """DATE 'YYYY-MM-DD' treated as string literal."""
+    result = sql_to_ra("SELECT * FROM R WHERE d < date '1995-03-15'")
+    assert "'1995-03-15'" in result
+
+
+def test_in_list_parseable():
+    """Translated IN expression is parseable by the RA parser."""
+    ra = sql_to_ra("SELECT * FROM R WHERE A IN (1, 2, 3)")
+    ast = parse(ra)
+    assert ast is not None
+
+
+def test_not_like_parseable():
+    """Translated NOT LIKE expression is parseable by the RA parser."""
+    ra = sql_to_ra("SELECT * FROM R WHERE name NOT LIKE 'MEDIUM%'")
+    ast = parse(ra)
+    assert ast is not None
+
+
+def test_between_parseable():
+    """Translated BETWEEN expression is parseable by the RA parser."""
+    ra = sql_to_ra("SELECT * FROM R WHERE A BETWEEN 1 AND 10")
+    ast = parse(ra)
+    assert ast is not None
+
+
+def test_modulo_parseable():
+    """Translated modulo expression is parseable by the RA parser."""
+    ra = sql_to_ra("SELECT * FROM R WHERE A%64 = 0")
+    ast = parse(ra)
+    assert ast is not None
+
+
+def test_date_parseable():
+    """Translated DATE literal is parseable by the RA parser."""
+    ra = sql_to_ra("SELECT * FROM R WHERE d < date '1995-03-15'")
+    ast = parse(ra)
+    assert ast is not None
+
+
+def test_complex_tpch_like_query():
+    """Complex TPC-H-style query with multiple new operators."""
+    sql = """
+        SELECT DISTINCT ps_partkey
+        FROM partsupp, supplier, nation
+        WHERE ps_suppkey = s_suppkey
+          AND s_nationkey = n_nationkey
+          AND n_name = 'GERMANY'
+          AND ps_partkey%512 = 0
+    """
+    ra = sql_to_ra(sql)
+    ast = parse(ra)
+    assert ast is not None
+
+
+def test_combined_in_and_not_like():
+    """Query using both IN and NOT LIKE."""
+    sql = """
+        SELECT * FROM part
+        WHERE p_brand <> 'Brand#45'
+          AND p_type NOT LIKE 'MEDIUM POLISHED%'
+          AND p_size IN (49, 14, 23)
+    """
+    ra = sql_to_ra(sql)
+    ast = parse(ra)
+    assert ast is not None
