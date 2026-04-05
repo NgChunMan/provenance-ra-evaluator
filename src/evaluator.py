@@ -229,10 +229,12 @@ class Evaluator:
         tables: Dict[str, KRelation],
         semiring: Semiring,
         strategy: DedupStrategy = DedupStrategy.EXISTENCE,
+        alias_map: Dict[str, str] | None = None,
     ) -> None:
         self.tables   = tables
         self.semiring = semiring
         self.strategy = strategy
+        self.alias_map = alias_map or {}
         self._handlers = {
             Table: self._eval_table,
             Select: self._eval_select,
@@ -282,9 +284,29 @@ class Evaluator:
 
     def _eval_table(self, expression) -> KRelation:
         name = expression.name
-        if name not in self.tables:
-            raise ValueError(f"Unknown table: {name!r}")
-        return self.tables[name]
+        if name in self.tables:
+            return self.tables[name]
+
+        # Check if this name is an alias for a real table
+        real_name = self.alias_map.get(name)
+        if real_name and real_name in self.tables:
+            return self._prefix_relation(self.tables[real_name], name)
+
+        raise ValueError(f"Unknown table: {name!r}")
+
+    def _prefix_relation(self, rel: KRelation, alias: str) -> KRelation:
+        """
+        Create a copy of *rel* with every column prefixed as ``alias.col``.
+
+        This supports self-joins: ``FROM nation n1, nation n2`` produces
+        two copies whose columns are ``n1.n_nationkey``, ``n2.n_nationkey``, etc.
+        """
+        new_schema = [f"{alias}.{col}" for col in rel.schema]
+        result = KRelation(new_schema, rel.semiring)
+        for old_key, ann in rel.items():
+            # old_key is aligned with rel.schema, new_key aligns with new_schema
+            result._data[old_key] = ann
+        return result
 
     def _eval_select(self, expression) -> KRelation:
         sub_rel = self.evaluate(expression.rel)
