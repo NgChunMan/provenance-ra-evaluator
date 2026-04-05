@@ -14,9 +14,9 @@ DuckDB bundles a built-in TPC-H generator conforming to the TPC-H specification:
     # SF 0.001 ≈ 60 lineitems, SF 0.01 ≈ 600, SF 0.1 ≈ 6000
     tables = load_tpch_from_duckdb(sf=0.01, semiring=BOOL_SR)
 
-Column schemas and type hints follow the TPC-H specification (v2.18.0).
-Integer columns are parsed as ``int``; dates are ISO-format strings;
-decimal monetary columns are kept as ``str`` (not used in predicates).
+Column schemas and type hints follow the TPC-H specification.
+Integer columns are parsed as ``int``; dates as ``datetime.date``;
+decimal columns (including ``l_quantity``) as ``Decimal``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.semirings.base import Semiring
 from src.relation.k_relation import KRelation
+
+# Recognised type hints for column schemas.
+# INT    → int
+# STR    → str
+# DATE   → datetime.date
+# DECIMAL → decimal.Decimal
+_VALID_HINTS = frozenset({"INT", "STR", "DATE", "DECIMAL"})
 
 
 # ── TPC-H table schemas ──────────────────────────────────────────────
@@ -53,7 +60,7 @@ SCHEMAS: Dict[str, List[Tuple[str, str]]] = {
         ("s_address", "STR"),
         ("s_nationkey", "INT"),
         ("s_phone", "STR"),
-        ("s_acctbal", "STR"),  # decimal — kept as string
+        ("s_acctbal", "DECIMAL"),
         ("s_comment", "STR"),
     ],
     "customer": [
@@ -62,7 +69,7 @@ SCHEMAS: Dict[str, List[Tuple[str, str]]] = {
         ("c_address", "STR"),
         ("c_nationkey", "INT"),
         ("c_phone", "STR"),
-        ("c_acctbal", "STR"),  # decimal
+        ("c_acctbal", "DECIMAL"),
         ("c_mktsegment", "STR"),
         ("c_comment", "STR"),
     ],
@@ -70,8 +77,8 @@ SCHEMAS: Dict[str, List[Tuple[str, str]]] = {
         ("o_orderkey", "INT"),
         ("o_custkey", "INT"),
         ("o_orderstatus", "STR"),
-        ("o_totalprice", "STR"),  # decimal
-        ("o_orderdate", "STR"),  # date as string YYYY-MM-DD
+        ("o_totalprice", "DECIMAL"),
+        ("o_orderdate", "DATE"),
         ("o_orderpriority", "STR"),
         ("o_clerk", "STR"),
         ("o_shippriority", "INT"),
@@ -82,15 +89,15 @@ SCHEMAS: Dict[str, List[Tuple[str, str]]] = {
         ("l_partkey", "INT"),
         ("l_suppkey", "INT"),
         ("l_linenumber", "INT"),
-        ("l_quantity", "INT"),
-        ("l_extendedprice", "STR"),  # decimal
-        ("l_discount", "STR"),  # decimal
-        ("l_tax", "STR"),  # decimal
+        ("l_quantity", "DECIMAL"),
+        ("l_extendedprice", "DECIMAL"),
+        ("l_discount", "DECIMAL"),
+        ("l_tax", "DECIMAL"),
         ("l_returnflag", "STR"),
         ("l_linestatus", "STR"),
-        ("l_shipdate", "STR"),  # date
-        ("l_commitdate", "STR"),  # date
-        ("l_receiptdate", "STR"),  # date
+        ("l_shipdate", "DATE"),
+        ("l_commitdate", "DATE"),
+        ("l_receiptdate", "DATE"),
         ("l_shipinstruct", "STR"),
         ("l_shipmode", "STR"),
         ("l_comment", "STR"),
@@ -103,14 +110,14 @@ SCHEMAS: Dict[str, List[Tuple[str, str]]] = {
         ("p_type", "STR"),
         ("p_size", "INT"),
         ("p_container", "STR"),
-        ("p_retailprice", "STR"),  # decimal
+        ("p_retailprice", "DECIMAL"),
         ("p_comment", "STR"),
     ],
     "partsupp": [
         ("ps_partkey", "INT"),
         ("ps_suppkey", "INT"),
         ("ps_availqty", "INT"),
-        ("ps_supplycost", "STR"),  # decimal
+        ("ps_supplycost", "DECIMAL"),
         ("ps_comment", "STR"),
     ],
 }
@@ -160,10 +167,10 @@ def load_tpch_from_duckdb(
         If ``duckdb`` is not installed.
     """
     # DuckDB column-type conversion rules:
-    # - BIGINT / INTEGER → already int
-    # - DECIMAL → int (for INT-typed columns) or str (for STR-typed)
-    # - DATE   → ISO-format string 'YYYY-MM-DD' (for evaluator comparisons)
-    # - VARCHAR → str (already)
+    # - BIGINT / INTEGER → int
+    # - DECIMAL → Decimal (for DECIMAL-typed), int (for INT-typed)
+    # - DATE   → datetime.date
+    # - VARCHAR → str
 
     try:
         import duckdb
@@ -200,21 +207,23 @@ def load_tpch_from_duckdb(
             for col_name, raw_val in zip(schema, raw_row):
                 hint = type_hints[col_name]
                 if raw_val is None:
-                    row[col_name] = ""
-                elif isinstance(raw_val, date):
-                    # DATE columns → 'YYYY-MM-DD' string for predicate comparison
-                    row[col_name] = raw_val.isoformat()
-                elif isinstance(raw_val, Decimal):
-                    if hint == "INT":
-                        row[col_name] = int(raw_val)
+                    row[col_name] = None
+                elif hint == "DATE":
+                    # Preserve as datetime.date
+                    if isinstance(raw_val, date):
+                        row[col_name] = raw_val
                     else:
-                        row[col_name] = str(raw_val)
-                elif hint == "INT" and not isinstance(raw_val, int):
+                        row[col_name] = date.fromisoformat(str(raw_val))
+                elif hint == "DECIMAL":
+                    # Preserve as Decimal
+                    if isinstance(raw_val, Decimal):
+                        row[col_name] = raw_val
+                    else:
+                        row[col_name] = Decimal(str(raw_val))
+                elif hint == "INT":
                     row[col_name] = int(raw_val)
-                elif hint == "STR" and not isinstance(raw_val, str):
-                    row[col_name] = str(raw_val)
                 else:
-                    row[col_name] = raw_val
+                    row[col_name] = str(raw_val) if not isinstance(raw_val, str) else raw_val
             rel.insert(row)
 
         result[table_name] = rel
@@ -364,7 +373,16 @@ def load_tpch_csvs(
                     continue
                 row: Dict[str, Any] = {}
                 for col, val, hint in zip(schema, values, types):
-                    row[col] = int(val) if hint == "INT" else val
+                    if not val:
+                        row[col] = None
+                    elif hint == "INT":
+                        row[col] = int(val)
+                    elif hint == "DATE":
+                        row[col] = date.fromisoformat(val)
+                    elif hint == "DECIMAL":
+                        row[col] = Decimal(val)
+                    else:
+                        row[col] = val
                 rel.insert(row)
                 count += 1
                 if limit is not None and count >= limit:
