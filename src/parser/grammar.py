@@ -289,6 +289,7 @@ _COMP = {
     '<=': lambda x, y: x <= y if x != None and y != None else False,
     '>': lambda x, y: x > y if x != None and y != None else False,
     '<': lambda x, y: x < y if x != None and y != None else False,
+    '%': lambda x, y: x % y if x != None and y != None else None,
 }
 
 
@@ -345,6 +346,90 @@ class Val(Atom):
 
     def __repr__(self):
         return f'{self.val}' if type(self.val) == int else f"'{self.val}'"
+
+
+class In(Cond):
+    """Membership test (lhs IN (v1, v2, ...)): true when lhs is in the value list."""
+
+    def __init__(self, lhs, values, negated=False):
+        self.lhs = lhs
+        self.values = values
+        self.negated = negated
+
+    def eval(self, row, attr):
+        result = self.lhs.eval(row, attr) in [v.eval(row, attr) for v in self.values]
+        return not result if self.negated else result
+
+    def __repr__(self):
+        vals = ', '.join(str(v) for v in self.values)
+        if self.negated:
+            return f'({self.lhs} NOT IN ({vals}))'
+        return f'({self.lhs} IN ({vals}))'
+
+
+class Like(Cond):
+    """Pattern match (lhs LIKE pattern): SQL LIKE with % and _ wildcards."""
+
+    def __init__(self, lhs, pattern, negated=False):
+        self.lhs = lhs
+        self.pattern = pattern
+        self.negated = negated
+
+    def eval(self, row, attr):
+        import re
+        val = self.lhs.eval(row, attr)
+        pat = self.pattern.eval(row, attr)
+        if val is None or pat is None:
+            return False
+        # Convert SQL LIKE pattern to regex: % -> .*, _ -> ., escape rest
+        regex = '^' + re.escape(str(pat)).replace(r'\%', '.*').replace(r'\_', '.') + '$'
+        # re.escape escapes % as \% and _ as \_
+        regex = regex.replace(r'\%', '.*').replace(r'\_', '.')
+        result = bool(re.match(regex, str(val)))
+        return not result if self.negated else result
+
+    def __repr__(self):
+        if self.negated:
+            return f'({self.lhs} NOT LIKE {self.pattern})'
+        return f'({self.lhs} LIKE {self.pattern})'
+
+
+class Between(Cond):
+    """Range test (lhs BETWEEN lo AND hi): sugar for lhs >= lo AND lhs <= hi."""
+
+    def __init__(self, lhs, lo, hi):
+        self.lhs = lhs
+        self.lo = lo
+        self.hi = hi
+
+    def eval(self, row, attr):
+        val = self.lhs.eval(row, attr)
+        lo = self.lo.eval(row, attr)
+        hi = self.hi.eval(row, attr)
+        if val is None or lo is None or hi is None:
+            return False
+        return lo <= val <= hi
+
+    def __repr__(self):
+        return f'({self.lhs} BETWEEN {self.lo} AND {self.hi})'
+
+
+class Mod(Atom):
+    """Modulo expression (lhs % rhs): evaluates to the remainder."""
+
+    def __init__(self, lhs, rhs):
+        self.lhs = lhs
+        self.rhs = rhs
+
+    def eval(self, row, attr):
+        l = self.lhs.eval(row, attr)
+        r = self.rhs.eval(row, attr)
+        if l is None or r is None:
+            return None
+        return l % r
+
+    def __repr__(self):
+        return f'{self.lhs} % {self.rhs}'
 
 
 #########################
