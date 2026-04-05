@@ -6,6 +6,8 @@ present exactly once before any operators are applied.
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Union
 
@@ -69,6 +71,10 @@ def load_csv(
         for col, val, hint in zip(schema, values, type_hints):
             if hint == "INT":
                 row[col] = int(val)
+            elif hint == "DATE":
+                row[col] = date.fromisoformat(val)
+            elif hint == "DECIMAL":
+                row[col] = Decimal(val)
             else:
                 row[col] = val
         rel.insert(row)
