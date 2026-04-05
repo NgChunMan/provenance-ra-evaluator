@@ -22,7 +22,7 @@ from src.parser.grammar import (
     Select, Project, Rename, Dedup, Group, Cross,
     Div, Inner, Outer, Anti, Union, Intersect,
     Minus, Table, And, Or, Not, Comp, Attr, Val,
-    Aggr
+    Aggr, In, Like, Between, Mod
 )
 
 
@@ -151,6 +151,9 @@ def tokenizer(s):
         elif match(')'):
             res.append(['CPAR'])
             idx += 1
+        elif match('%'):
+            res.append(['MOD'])
+            idx += 1
         elif match('σ'):
             res.append(['SELECT'])
             idx += 1
@@ -213,7 +216,19 @@ def tokenizer(s):
             while idx < end and (isany(ALP + SYM) or isany(NUM)):
                 val += s[idx]
                 idx += 1
-            res.append(['NAME', val])
+            upper = val.upper()
+            if upper == 'IN':
+                res.append(['IN'])
+            elif upper == 'NOT':
+                res.append(['KNOT'])
+            elif upper == 'LIKE':
+                res.append(['LIKE'])
+            elif upper == 'BETWEEN':
+                res.append(['BETWEEN'])
+            elif upper == 'AND':
+                res.append(['AND'])
+            else:
+                res.append(['NAME', val])
             continue
         else:
             raise Exception(f'Unknown symbol {s[idx]}')
@@ -435,6 +450,48 @@ def parser(tok):
     def parse_rel(tok):  # relational
         nonlocal idx
         res = parse_cond(tok)
+        # Handle IN: expr IN (v1, v2, ...)
+        if idx < end and match('IN'):
+            idx += 1
+            expect('OPAR')
+            values = [parse_cond(tok)]
+            while idx < end and match('COMMA'):
+                idx += 1
+                values.append(parse_cond(tok))
+            expect('CPAR')
+            return In(res, values)
+        # Handle NOT IN / NOT LIKE
+        if idx < end and match('KNOT'):
+            idx += 1
+            if match('IN'):
+                idx += 1
+                expect('OPAR')
+                values = [parse_cond(tok)]
+                while idx < end and match('COMMA'):
+                    idx += 1
+                    values.append(parse_cond(tok))
+                expect('CPAR')
+                return In(res, values, negated=True)
+            elif match('LIKE'):
+                idx += 1
+                pat = parse_cond(tok)
+                return Like(res, pat, negated=True)
+            else:
+                raise Exception(
+                    f'Unexpected token after NOT, expect IN or LIKE, got {tok[idx]}'
+                )
+        # Handle LIKE: expr LIKE pattern
+        if idx < end and match('LIKE'):
+            idx += 1
+            pat = parse_cond(tok)
+            return Like(res, pat)
+        # Handle BETWEEN: expr BETWEEN lo AND hi
+        if idx < end and match('BETWEEN'):
+            idx += 1
+            lo = parse_cond(tok)
+            expect('AND')
+            hi = parse_cond(tok)
+            return Between(res, lo, hi)
         while idx < end and (match('EQ') or match('NEQ') or match('GEQ')
                              or match('LEQ') or match('GT') or match('LT')):
             op = tok[idx][0]
@@ -448,6 +505,10 @@ def parser(tok):
         if match('VAL'):
             res = Val(tok[idx][1])
             idx += 1
+            if idx < end and match('MOD'):
+                idx += 1
+                rhs = parse_cond(tok)
+                res = Mod(res, rhs)
             return res
         elif match('NAME'):
             arg = tok[idx][1]
@@ -456,7 +517,12 @@ def parser(tok):
                 idx += 1
                 arg += '.' + tok[idx][1]
                 idx += 1
-            return Attr(arg)
+            res = Attr(arg)
+            if idx < end and match('MOD'):
+                idx += 1
+                rhs = parse_cond(tok)
+                res = Mod(res, rhs)
+            return res
         elif match('OPAR'):
             idx += 1
             expr = parse_log(tok)
