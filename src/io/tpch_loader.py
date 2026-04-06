@@ -25,7 +25,7 @@ import csv
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from src.semirings.base import Semiring
 from src.relation.k_relation import KRelation
@@ -318,6 +318,7 @@ def load_tpch_csvs(
     semiring: Semiring,
     tables: Optional[List[str]] = None,
     limit: Optional[int] = None,
+    annotation_factory: Optional[Callable[[str, int, Dict[str, Any]], Any]] = None,
 ) -> Dict[str, KRelation]:
     """
     Load TPC-H CSV files into KRelations.
@@ -332,6 +333,10 @@ def load_tpch_csvs(
         Load only these tables.  If omitted, all available CSVs are loaded.
     limit : int, optional
         Cap each table at this many rows.
+    annotation_factory : callable, optional
+        If provided, called as ``annotation_factory(table_name, row_index, row)``
+        for each loaded row. Its return value is used as the tuple annotation.
+        When omitted, rows receive ``semiring.one()`` via ``KRelation.insert``.
 
     Returns
     -------
@@ -383,7 +388,12 @@ def load_tpch_csvs(
                         row[col] = Decimal(val)
                     else:
                         row[col] = val
-                rel.insert(row)
+                annotation = (
+                    annotation_factory(table_name, count + 1, row)
+                    if annotation_factory is not None
+                    else None
+                )
+                rel.insert(row, annotation)
                 count += 1
                 if limit is not None and count >= limit:
                     break
