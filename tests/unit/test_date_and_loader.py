@@ -8,7 +8,7 @@ import pytest
 
 from src.sql_to_ra import sql_to_ra, sql_to_ra_with_aliases, SQLTranslationError
 from src.parser import parse
-from src.semirings import BOOL_SR
+from src.semirings import BOOL_SR, BOOLFUNC_SR, BoolFunc
 from src.io.tpch_loader import (
     SCHEMAS,
     generate_tpch_csvs,
@@ -259,6 +259,25 @@ class TestTpchCsvRoundTrip:
         row = dict(zip(nation.schema, first))
         assert isinstance(row['n_nationkey'], int)
         assert isinstance(row['n_regionkey'], int)
+
+    def test_load_tpch_csvs_annotation_factory_assigns_tuple_variables(self, tmp_path):
+        """annotation_factory can attach deterministic provenance variables per row."""
+        generate_tpch_csvs(sf=0.001, output_dir=tmp_path, limit=2)
+        tables = load_tpch_csvs(
+            tmp_path,
+            BOOLFUNC_SR,
+            tables=['nation'],
+            limit=2,
+            annotation_factory=lambda table_name, row_index, row: BoolFunc.var(
+                f"{table_name}_{row_index}"
+            ),
+        )
+
+        annotations = list(tables['nation']._data.values())
+        assert annotations == [
+            BoolFunc.var('nation_1'),
+            BoolFunc.var('nation_2'),
+        ]
 
     def test_generate_with_limit(self, tmp_path):
         """limit= caps rows in the generated CSV."""
