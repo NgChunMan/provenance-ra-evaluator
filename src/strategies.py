@@ -22,10 +22,9 @@ HOW_PROVENANCE
 
     The annotation already IS the how-provenance — no transformation needed:
       - 𝔹 Boolean: True → True  (identical to EXISTENCE; True = one())
-      - PosBool[X] formula: each DNF clause = a minimal sufficient witness set
+      - 𝔹[X] formula: each DNF clause = a minimal sufficient witness set
       - ℕ Counting: 42 → 42  (multiplicity preserved; contrast EXISTENCE: 42 → 1)
-      - ℕ[X] polynomial: coefficients = number of derivation paths,
-                         exponents = times a tuple was reused in a path
+      - ℕ[X] polynomial: coefficients = number of derivation paths, exponents = times a tuple was reused in a path
 """
 
 from enum import Enum, auto

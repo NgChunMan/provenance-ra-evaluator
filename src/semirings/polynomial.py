@@ -16,9 +16,8 @@ As RA operators are applied, annotations combine:
     Union / projection →  polynomial addition        (+)
 
 The resulting polynomial for an output tuple records:
-    - WHICH  input tuples contributed  (the variables present)
-    - HOW    they combined             (coefficient = number of derivation paths,
-                                        exponent    = times the same tuple was used)
+    - WHICH input tuples contributed  (the variables present)
+    - HOW they combined (coefficient = number of derivation paths, exponent = times the same tuple was used)
 
 Example: annotation  2t1² + t1·t3
     means: the output tuple is derivable in 3 distinct ways —
@@ -27,17 +26,6 @@ Example: annotation  2t1² + t1·t3
 
 This is what the paper calls "how-provenance", in contrast to the
 simpler "why-provenance" (just a set of contributing tuple IDs).
-
-Deduplication and LINEAGE
---------------------------
-The LINEAGE strategy calls  ann.variables()  to extract all variable
-names from the polynomial.  This collapses how-provenance back down to
-why-provenance level:
-
-    2t1² + t1·t3  →  {'t1', 't3'}
-
-The coefficient 2 and exponent 2 are discarded; only which variables
-appear is retained.
 """
 
 from __future__ import annotations
@@ -138,7 +126,7 @@ class Polynomial:
     Provenance methods
     ------------------
     variables()             — set of all variable names in any monomial
-                              (LINEAGE strategy calls this)
+                              (provenance extraction calls this)
     first_monomial_poly()   — single-term polynomial with one witness
                               (useful for a "Strategy 2" witness extension)
     term_count()            — number of distinct monomials (for benchmarks)
@@ -211,7 +199,8 @@ class Polynomial:
         Return all tuple-ID variable names that appear anywhere
         in any monomial of this polynomial.
 
-        Used by the LINEAGE deduplication strategy:
+        Used for provenance extraction (collapses how-provenance to
+        why-provenance):
             2t1² + t1·t3 + t2²  →  {'t1', 't2', 't3'}
 
         This is a lossy projection: coefficients and exponents are dropped.
@@ -227,9 +216,6 @@ class Polynomial:
     def first_monomial_poly(self) -> 'Polynomial':
         """
         Return a single-term polynomial containing only the first monomial.
-
-        Useful for a 'witness' display (one concrete derivation path),
-        but not used by either EXISTENCE or LINEAGE directly.
         """
         if self.is_zero():
             return Polynomial.zero()

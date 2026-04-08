@@ -54,7 +54,7 @@ TC-4  — Boolean semiring, schema: (Name,)
         │ Bob   │ True       │
         └───────┴────────────┘
 
-TC-8  — BoolFunc semiring (PosBool[X]), schema: (Name,)
+TC-8  — BoolFunc semiring (𝔹[X]), schema: (Name,)
         ┌───────┬───────────────────────┐
         │ Name  │ Annotation            │
         ├───────┼───────────────────────┤
@@ -274,11 +274,11 @@ class TestSingleVariablePolynomial:
 
 class TestHowProvenanceBoolFunc:
     """
-    HOW_PROVENANCE works for BoolFunc annotations (PosBool[X] semiring).
+    HOW_PROVENANCE works for BoolFunc annotations (𝔹[X] semiring).
 
-    The formula is the how-provenance of PosBool[X]: each DNF clause
+    The formula is the how-provenance of 𝔹[X]: each DNF clause
     represents a minimal sufficient witness set (a conjunction of input
-    tuple-IDs).  HOW_PROVENANCE returns it unchanged.
+    tuple-IDs). HOW_PROVENANCE returns it unchanged.
     EXISTENCE collapses it to BoolFunc.true_() (the semiring one element).
     """
 
