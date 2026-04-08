@@ -20,13 +20,13 @@ TC-6   Dedup idempotence in pipeline (𝔹)
        (δ(δ(π[Name](R))) == δ(π[Name](R)))
 TC-7   Full pipeline with ℕ[X]: × → σ → π → δ(HOW_PROVENANCE)
        provenance polynomials survive deduplication
-TC-8   Full pipeline with PosBool[X]: × → σ → π → δ(HOW_PROVENANCE)
+TC-8   Full pipeline with 𝔹[X]: × → σ → π → δ(HOW_PROVENANCE)
        provenance formulas survive deduplication
 TC-9   Full pipeline with ℕ[X]: × → σ → π → δ(EXISTENCE)
        polynomials collapse to Polynomial.one()
 TC-10  Full pipeline with ℕ: ⊎ → δ(HOW_PROVENANCE)
        counting multiplicities survive deduplication
-TC-11  Full pipeline with PosBool[X]: ⊎ → π → δ(EXISTENCE)
+TC-11  Full pipeline with 𝔹[X]: ⊎ → π → δ(EXISTENCE)
        formulas collapse to BoolFunc.true_()
 
 Test data / schemas
@@ -69,7 +69,7 @@ TC-7, TC-9 — Polynomial semiring (ℕ[X])
     │ 2  │ Paris    │ s2         │
     └────┴──────────┴────────────┘
 
-TC-8, TC-11 — BoolFunc semiring (PosBool[X])
+TC-8, TC-11 — BoolFunc semiring (𝔹[X])
 
     R_bf (Employees), schema: (Name, DeptID)
     ┌───────┬────────┬────────────┐
@@ -174,7 +174,7 @@ def S_poly():
 
 @pytest.fixture
 def R_bf():
-    """Employees table (PosBool[X])."""
+    """Employees table (𝔹[X])."""
     x1 = BoolFunc.var("x1")
     x2 = BoolFunc.var("x2")
     x3 = BoolFunc.var("x3")
@@ -187,7 +187,7 @@ def R_bf():
 
 @pytest.fixture
 def S_bf():
-    """Departments table (PosBool[X])."""
+    """Departments table (𝔹[X])."""
     y1 = BoolFunc.var("y1")
     y2 = BoolFunc.var("y2")
     rel = KRelation(["ID", "Location"], BOOLFUNC_SR)
@@ -379,7 +379,7 @@ def test_boolfunc_union_project_existence(R_bf):
     """
     TC-11: δ_EXISTENCE( π[Name]( R ⊎ R ) )
 
-    In PosBool[X]: add = ∨, so self-union gives identical formulas
+    In 𝔹[X]: add = ∨, so self-union gives identical formulas
     (x1 ∨ x1 = x1 after absorption).
     EXISTENCE then collapses everything to BoolFunc.true_().
     """

@@ -1,58 +1,9 @@
 """
-Boolean Function semiring PosBool[X] (𝔹[X], ∨, ∧, False, True).
+Boolean Function semiring 𝔹[X].
 
-Unlike the plain Boolean semiring (𝔹), annotations here are positive
+Unlike the plain Boolean semiring (𝔹), annotations here are 
 Boolean formulas over tuple-ID variables — expressions built from
-variable names, ∨ (OR), and ∧ (AND), with no negation.
-
-Provenance interpretation
---------------------------
-Each input tuple tᵢ is tagged with BoolFunc.var("tᵢ"). As RA
-operators are applied, annotations combine:
-
-    Join / selection  →  conjunction  (∧ = mul)
-    Union / projection →  disjunction  (∨ = add)
-
-The resulting formula for an output tuple records WHICH COMBINATIONS
-of input tuples are sufficient to produce it:
-
-    Example: annotation  (t1 ∧ t3) ∨ t2
-        means the output tuple exists if (t1 AND t3 are present)
-               OR (t2 is present alone).
-
-This is "why-provenance" at the level of sufficient witnesses,
-which is more informative than plain 𝔹 (presence only) but less
-detailed than ℕ[X] (full derivation-path counts).
-
-Formula representation
------------------------
-A BoolFunc is a frozenset of frozensets of strings:
-
-    Outer frozenset  — disjunction (OR) of clauses
-    Inner frozenset  — conjunction (AND) of variables within a clause
-
-This is Disjunctive Normal Form (DNF). DNF is chosen because:
-    add (∨) = union of clause sets  — O(1)
-    mul (∧) = distribute clauses    — O(|a| · |b|)
-    is_zero — the formula is unsatisfiable — outer set is empty
-
-Absorption / simplification
------------------------------
-After each add() or mul(), absorption is applied:
-    If clause A ⊆ clause B, then B is subsumed and removed.
-    (A is at least as general as B — it is satisfied by more inputs.)
-This keeps formulas compact and in a canonical reduced form.
-
-Example absorption:
-    {t1} ∨ {t1 ∧ t2}  →  {t1}
-    because any assignment satisfying {t1} already satisfies {t1 ∧ t2}.
-
-Semiring axioms hold:
-    zero()  =  False  (empty disjunction — no clause can be satisfied)
-    one()   =  True   (single empty clause — always satisfied)
-    add     =  ∨      (commutative, associative, idempotent)
-    mul     =  ∧      (commutative, associative, distributes over ∨)
-    0 · a   =  0      (distributing over empty clause set gives empty)
+variable names, ∨ (OR), and ∧ (AND).
 """
 
 from __future__ import annotations
@@ -94,7 +45,7 @@ def _absorb(clauses: Set[_Clause]) -> _Formula:
 
 class BoolFunc:
     """
-    An element of PosBool[X]: a positive Boolean formula in DNF.
+    An element of 𝔹[X]: a positive Boolean formula.
 
     Immutable. Equality and hashing are based on the canonical
     absorbed DNF representation, so two logically equivalent formulas
@@ -215,7 +166,7 @@ class BoolFuncSemiring(Semiring):
 
     @property
     def name(self) -> str:
-        return "Boolean Function (PosBool[X])"
+        return "Boolean Function (𝔹[X])"
 
 
 # Module-level singleton — import and use directly
