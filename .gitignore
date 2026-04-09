@@ -1,5 +1,6 @@
 __pycache__/
 .pytest_cache/
 venv/
-Project Outlines.pdf
-data/A01_data
+
+benchmark/*.png
+benchmark/tpch_data
