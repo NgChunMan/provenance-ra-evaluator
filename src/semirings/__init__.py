@@ -1,10 +1,10 @@
-"""
-src/semirings/__init__.py
-Re-exports all public semiring objects for convenient importing.
+"""Semirings package — re-exports all public semiring classes and singletons.
 
-Usage:
-    from src.semirings import BOOL_SR, NAT_SR, POLY_SR
-    from src.semirings import BooleanSemiring, CountingSemiring, PolynomialSemiring
+Available semirings:
+    BOOL_SR: Boolean semiring (𝔹, ∨, ∧, False, True) — set semantics.
+    NAT_SR: Counting semiring (ℕ, +, ×, 0, 1) — bag / multiset semantics.
+    POLY_SR: Polynomial semiring (ℕ[X]) — how-provenance semantics.
+    BOOLFUNC_SR: Boolean function semiring (𝔹[X]) — Boolean provenance.
 """
 
 from .base import Semiring

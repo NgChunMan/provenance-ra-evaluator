@@ -50,30 +50,27 @@ def deduplication(
     relation: KRelation,
     strategy: DedupStrategy = DedupStrategy.EXISTENCE,
 ) -> KRelation:
-    """
-    Apply the δ (deduplication) operator to a K-annotated relation.
+    """Apply the δ (deduplication) operator to a K-annotated relation.
 
     Both strategies share the same outer loop structure:
-        1. Iterate all (row_key, annotation) pairs in the input.
-        2. Skip rows whose annotation equals semiring.zero() (absent tuples).
-        3. Assign a new annotation according to the chosen strategy.
 
-    The returned KRelation has the same schema and semiring as the input.
-    For HOW_PROVENANCE the annotation is passed through unchanged from the
+    1. Iterate all ``(row_key, annotation)`` pairs in the input.
+    2. Skip rows whose annotation equals ``semiring.zero()`` (absent tuples).
+    3. Assign a new annotation according to the chosen strategy.
+
+    The returned ``KRelation`` has the same schema and semiring as the input.
+    For ``HOW_PROVENANCE`` the annotation is passed through unchanged from the
     input relation — it is the identity on nonzero annotations.
 
-    Parameters
-    ----------
-    relation : KRelation
-        The input K-annotated relation.
-    strategy : DedupStrategy
-        EXISTENCE — collapse any nonzero annotation to semiring.one().
-        HOW_PROVENANCE — pass the annotation through unchanged.
+    Args:
+        relation (KRelation): The input K-annotated relation.
+        strategy (DedupStrategy): Controls how annotations are transformed.
+            ``EXISTENCE`` collapses any nonzero annotation to
+            ``semiring.one()``. ``HOW_PROVENANCE`` passes the annotation
+            through unchanged.
 
-    Returns
-    -------
-    KRelation
-        New relation with deduplicated annotations.
+    Returns:
+        KRelation: New relation with deduplicated annotations.
         The original relation is not modified.
     """
     semiring = relation.semiring

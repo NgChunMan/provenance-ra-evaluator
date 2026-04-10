@@ -16,14 +16,71 @@ from .base import Semiring
 
 
 class BooleanSemiring(Semiring):
-    def zero(self) -> bool: return False
-    def one(self) -> bool: return True
-    def add(self, a: bool, b: bool) -> bool: return a or b
-    def mul(self, a: bool, b: bool) -> bool: return a and b
-    def is_zero(self, a: bool) -> bool: return not a
+    """Boolean semiring (𝔹, ∨, ∧, False, True) — standard set semantics.
+
+    A tuple is either in the relation (``True``) or absent (``False``).
+    There are no multiplicities and no provenance.
+    """
+
+    def zero(self) -> bool:
+        """Return the additive identity ``False`` (tuple absent).
+
+        Returns:
+            bool: Always ``False``.
+        """
+        return False
+
+    def one(self) -> bool:
+        """Return the multiplicative identity ``True`` (tuple present).
+
+        Returns:
+            bool: Always ``True``.
+        """
+        return True
+
+    def add(self, a: bool, b: bool) -> bool:
+        """Return the logical OR of two Boolean annotations.
+
+        Args:
+            a (bool): Left annotation.
+            b (bool): Right annotation.
+
+        Returns:
+            bool: ``a or b``.
+        """
+        return a or b
+
+    def mul(self, a: bool, b: bool) -> bool:
+        """Return the logical AND of two Boolean annotations.
+
+        Args:
+            a (bool): Left annotation.
+            b (bool): Right annotation.
+
+        Returns:
+            bool: ``a and b``.
+        """
+        return a and b
+
+    def is_zero(self, a: bool) -> bool:
+        """Return ``True`` iff the annotation is the zero element ``False``.
+
+        Args:
+            a (bool): The annotation to test.
+
+        Returns:
+            bool: ``not a``.
+        """
+        return not a
 
     @property
-    def name(self) -> str: return "Boolean (𝔹)"
+    def name(self) -> str:
+        """Return the semiring display name.
+
+        Returns:
+            str: ``'Boolean (𝔹)'``.
+        """
+        return "Boolean (𝔹)"
 
 
 # Module-level singleton — import and use directly

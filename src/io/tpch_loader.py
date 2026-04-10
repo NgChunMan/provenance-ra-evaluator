@@ -1,12 +1,13 @@
-"""
-TPC-H data loader: generates and loads specification-conformant TPC-H data.
+"""TPC-H data loader: generates and loads specification-conformant TPC-H data.
 
 This module provides:
-- load_tpch_from_duckdb() — generate TPC-H data in-memory via DuckDB
-- generate_tpch_csvs() — generate TPC-H data and write to CSV files
-- load_tpch_csvs() — load pre-generated TPC-H CSV files into KRelations
 
-DuckDB bundles a built-in TPC-H generator conforming to the TPC-H specification:
+- load_tpch_from_duckdb(): Generate TPC-H data in-memory via DuckDB.
+- generate_tpch_csvs(): Generate TPC-H data and write to CSV files.
+- load_tpch_csvs(): Load pre-generated TPC-H CSV files into KRelations.
+
+DuckDB bundles a built-in TPC-H generator conforming to the TPC-H
+specification::
 
     from src.io.tpch_loader import load_tpch_from_duckdb
     from src.semirings import BOOL_SR
@@ -131,45 +132,26 @@ def load_tpch_from_duckdb(
     tables: Optional[List[str]] = None,
     limit: Optional[int] = None,
 ) -> Dict[str, KRelation]:
-    """
-    Generate TPC-H data at any scale factor using DuckDB and load into KRelations.
+    """Generate TPC-H data at any scale factor using DuckDB and load into KRelations.
 
-    Scale factor guidelines
-    -----------------------
-    +---------+-----------+-----------+-----------+
-    | SF      | lineitem  | orders    | customer  |
-    +=========+===========+===========+===========+
-    | 0.001   |   ~60     |   ~150    |    ~150   |
-    | 0.01    |   ~600    |   1 500   |    1 500  |
-    | 0.1     |   ~6 000  |  15 000   |   15 000  |
-    | 1       |   6 M     |   1.5 M   |  150 000  |
-    +---------+-----------+-----------+-----------+
+    Args:
+        sf (float): TPC-H scale factor (e.g. ``0.01`` for ~600 lineitem rows).
+        semiring (Semiring): The semiring to annotate tuples with.
+        tables (Optional[List[str]]): Load only these tables. If omitted,
+            all 8 tables are loaded.
+        limit (Optional[int]): Cap each table at this many rows (useful for
+            quick smoke tests).
 
-    Parameters
-    ----------
-    sf : float
-        TPC-H scale factor (e.g. 0.01 for ~600 lineitem rows).
-    semiring : Semiring
-        The semiring to annotate tuples with.
-    tables : list of str, optional
-        Load only these tables. If omitted, all 8 tables are loaded.
-    limit : int, optional
-        Cap each table at this many rows (useful for quick smoke tests).
+    Returns:
+        Dict[str, KRelation]: Mapping from table name to loaded KRelation.
 
-    Returns
-    -------
-    Dict[str, KRelation]
-        Mapping from table name to loaded KRelation.
-
-    Raises
-    ------
-    ImportError
-        If ``duckdb`` is not installed.
+    Raises:
+        ImportError: If ``duckdb`` is not installed.
     """
     # DuckDB column-type conversion rules:
     # - BIGINT / INTEGER → int
     # - DECIMAL → Decimal (for DECIMAL-typed), int (for INT-typed)
-    # - DATE   → datetime.date
+    # - DATE → datetime.date
     # - VARCHAR → str
 
     try:
@@ -236,30 +218,25 @@ def generate_tpch_csvs(
     output_dir: Union[str, Path],
     limit: Optional[int] = None,
 ) -> List[str]:
-    """
-    Generate TPC-H data via DuckDB and write CSV files to output_dir.
-    - Line 1: type hints (``INT`` or ``STR`` per column)
-    - Line 2: column names
-    - Line 3+: data rows
+    """Generate TPC-H data via DuckDB and write CSV files to *output_dir*.
 
-    Parameters
-    ----------
-    sf : float
-        TPC-H scale factor (e.g. 0.01 for ~600 lineitem rows).
-    output_dir : str or Path
-        Directory to write the CSV files to. Created if it does not exist.
-    limit : int, optional
-        Cap each table at this many rows.
+    CSV format (3-line header)::
 
-    Returns
-    -------
-    List[str]
-        Names of tables written (e.g. ``['nation', 'region', ...]``).
+        Line 1: type hints (``INT``, ``STR``, ``DATE``, or ``DECIMAL`` per column)
+        Line 2: column names
+        Line 3+: data rows
 
-    Raises
-    ------
-    ImportError
-        If ``duckdb`` is not installed.
+    Args:
+        sf (float): TPC-H scale factor (e.g. ``0.01`` for ~600 lineitem rows).
+        output_dir (Union[str, Path]): Directory to write the CSV files to.
+            Created if it does not exist.
+        limit (Optional[int]): Cap each table at this many rows.
+
+    Returns:
+        List[str]: Names of tables written (e.g. ``['nation', 'region', ...]``).
+
+    Raises:
+        ImportError: If ``duckdb`` is not installed.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -320,33 +297,27 @@ def load_tpch_csvs(
     limit: Optional[int] = None,
     annotation_factory: Optional[Callable[[str, int, Dict[str, Any]], Any]] = None,
 ) -> Dict[str, KRelation]:
-    """
-    Load TPC-H CSV files into KRelations.
+    """Load TPC-H CSV files into KRelations.
 
-    Parameters
-    ----------
-    csv_dir : str or Path
-        Directory containing the CSV files (e.g. ``data/tpch/``).
-    semiring : Semiring
-        The semiring to annotate tuples with.
-    tables : list of str, optional
-        Load only these tables.  If omitted, all available CSVs are loaded.
-    limit : int, optional
-        Cap each table at this many rows.
-    annotation_factory : callable, optional
-        If provided, called as ``annotation_factory(table_name, row_index, row)``
-        for each loaded row. Its return value is used as the tuple annotation.
-        When omitted, rows receive ``semiring.one()`` via ``KRelation.insert``.
+    Args:
+        csv_dir (Union[str, Path]): Directory containing the CSV files
+            (e.g. ``data/tpch/``).
+        semiring (Semiring): The semiring to annotate tuples with.
+        tables (Optional[List[str]]): Load only these tables. If omitted,
+            all available CSVs are loaded.
+        limit (Optional[int]): Cap each table at this many rows.
+        annotation_factory (Optional[Callable]): If provided, called as
+            ``annotation_factory(table_name, row_index, row)`` for each loaded
+            row. Its return value is used as the tuple annotation. When
+            omitted, rows receive ``semiring.one()`` via
+            :meth:`~src.relation.KRelation.insert`.
 
-    Returns
-    -------
-    Dict[str, KRelation]
-        Mapping from table name to loaded KRelation.
+    Returns:
+        Dict[str, KRelation]: Mapping from table name to loaded KRelation.
 
-    Raises
-    ------
-    FileNotFoundError
-        If csv_dir does not exist or contains no TPC-H CSV files.
+    Raises:
+        FileNotFoundError: If ``csv_dir`` does not exist or contains no
+            TPC-H CSV files.
     """
     csv_dir = Path(csv_dir)
     if not csv_dir.is_dir():
