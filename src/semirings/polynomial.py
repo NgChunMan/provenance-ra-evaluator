@@ -252,10 +252,6 @@ class Polynomial:
         return " + ".join(parts)
 
 
-# ──────────────────────────────────────────────────────────────────────
-# PolynomialSemiring
-# ──────────────────────────────────────────────────────────────────────
-
 class PolynomialSemiring(Semiring):
     """
     Semiring wrapper around Polynomial arithmetic.

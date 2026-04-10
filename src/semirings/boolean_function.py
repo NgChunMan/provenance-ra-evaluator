@@ -52,9 +52,9 @@ class BoolFunc:
     that reduce to the same DNF compare equal.
 
     Do not construct directly — use the class methods:
-        BoolFunc.false_()      →  zero element
-        BoolFunc.true_()       →  one element
-        BoolFunc.var(name)     →  single-variable formula
+        BoolFunc.false_() →  zero element
+        BoolFunc.true_()  →  one element
+        BoolFunc.var(name) →  single-variable formula
     """
 
     __slots__ = ("_formula",)
@@ -141,12 +141,12 @@ class BoolFuncSemiring(Semiring):
     """
     Semiring of positive Boolean functions over tuple variables.
 
-    Elements : BoolFunc   (positive Boolean formula in DNF)
-    zero()   : BoolFunc.false_()  — unsatisfiable formula
-    one()    : BoolFunc.true_()   — tautology
-    add(a,b) : a.disjoin(b)       — logical OR
-    mul(a,b) : a.conjoin(b)       — logical AND
-    is_zero  : a.is_false()
+    Elements : BoolFunc
+    zero(): BoolFunc.false_() — unsatisfiable formula
+    one(): BoolFunc.true_() — tautology
+    add(a,b): a.disjoin(b) — logical OR
+    mul(a,b): a.conjoin(b) — logical AND
+    is_zero: a.is_false()
     """
 
     def zero(self) -> BoolFunc:
