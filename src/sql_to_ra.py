@@ -8,7 +8,7 @@ Supported SQL subset
 --------------------
 - ``SELECT [DISTINCT] col1, col2, ... FROM table1, table2, ... [WHERE cond]``
 - ``SELECT [DISTINCT] * FROM table [WHERE cond]``
-- ``UNION`` / ``UNION ALL`` (both map to multiset union ∪)
+- ``UNION ALL`` maps to multiset sum ⊎; ``UNION`` maps to δ(⊎) (deduplication applied after merging)
 - WHERE conditions: ``=``, ``<>``, ``!=``, ``>=``, ``<=``, ``>``, ``<``,
   ``AND``, ``OR``, ``NOT``, and parentheses for grouping
 - ``IN (val1, val2, ...)``, ``NOT IN (...)``
@@ -39,7 +39,8 @@ SQL → RA operator mapping
 | ``SELECT a, b``          | ``π[a, b](…)``            |
 | ``SELECT *``             | (no projection node)      |
 | ``DISTINCT``             | ``δ(…)``                  |
-| ``UNION``                | ``(… ∪ …)``               |
+| ``UNION``                | ``δ(… ⊎ …)``             |
+| ``UNION ALL``            | ``(… ⊎ …)``               |
 | ``AND``                  | ``/\\``                   |
 | ``OR``                   | ``\\/``                   |
 | ``NOT``                  | ``~(…)``                  |
@@ -56,10 +57,9 @@ from typing import Dict, List, Optional, Tuple
 # ── Public exception ──────────────────────────────────────────────────
 
 class SQLTranslationError(ValueError):
-    """
-    Raised when a SQL query cannot be translated to relational algebra.
+    """Raised when a SQL query cannot be translated to relational algebra.
 
-    This covers both syntax errors and the use of unsupported SQL constructs.
+    Covers both syntax errors and the use of unsupported SQL constructs.
     """
 
 
@@ -98,26 +98,30 @@ _TokenList = List[_Token]
 
 
 def _tokenize(sql: str) -> _TokenList:
-    """
-    Tokenize a SQL string into ``(tag, value)`` pairs.
+    """Tokenize a SQL string into ``(tag, value)`` pairs.
 
-    Tags
-    ----
-    ``KW``    SQL keyword (stored upper-cased)
-    ``IDENT`` identifier, or ``table.column`` qualified name
-    ``INT``   integer literal (stored as string of digits)
-    ``STR``   string literal (including surrounding single quotes)
-    ``OP``    comparison operator (``=``, ``<>``, ``!=``, ``>=``, ``<=``, ``>``, ``<``)
-    ``COMMA`` ``,``
-    ``STAR``  ``*``
-    ``OPAR``  ``(``
-    ``CPAR``  ``)``
-    ``MOD``   ``%``
+    Tags:
+        ``KW``: SQL keyword (stored upper-cased).
+        ``IDENT``: Identifier, or ``table.column`` qualified name.
+        ``INT``: Integer literal (stored as string of digits).
+        ``STR``: String literal (including surrounding single quotes).
+        ``OP``: Comparison operator (``=``, ``<>``, ``!=``, ``>=``, ``<=``,
+            ``>``, ``<``).
+        ``COMMA``: ``,``.
+        ``STAR``: ``*``.
+        ``OPAR``: ``(``.
+        ``CPAR``: ``)``.
+        ``MOD``: ``%``.
 
-    Raises
-    ------
-    SQLTranslationError
-        On unterminated string literals or unrecognised characters.
+    Args:
+        sql (str): A SQL query string.
+
+    Returns:
+        _TokenList: List of ``(tag, value)`` token tuples.
+
+    Raises:
+        SQLTranslationError: On unterminated string literals or unrecognised
+            characters.
     """
     tokens: _TokenList = []
     i = 0
@@ -231,22 +235,21 @@ def _tokenize(sql: str) -> _TokenList:
 # ── Date arithmetic helper ────────────────────────────────────────────
 
 def _date_add(date_lit: str, amount: int, unit: str) -> str:
-    """
-    Compute ``date_lit +/- amount unit`` and return new ``'YYYY-MM-DD'`` literal.
+    """Compute ``date_lit +/- amount unit`` and return a new ``'YYYY-MM-DD'`` literal.
 
-    Parameters
-    ----------
-    date_lit : str
-        A date string literal like ``'1994-01-01'`` (with or without quotes).
-    amount : int
-        Number of units to add (negative to subtract).
-    unit : str
-        One of ``'YEAR'``, ``'MONTH'``, ``'DAY'``.
+    Args:
+        date_lit (str): A date string literal like ``'1994-01-01'`` (with or
+            without surrounding single quotes).
+        amount (int): Number of units to add (use a negative value to subtract).
+        unit (str): One of ``'YEAR'``, ``'MONTH'``, ``'DAY'``.
 
-    Returns
-    -------
-    str
-        New date literal with surrounding single quotes, e.g. ``"'1995-01-01'"``.
+    Returns:
+        str: New date literal with surrounding single quotes,
+        e.g. ``"'1995-01-01'"``.
+
+    Raises:
+        SQLTranslationError: If the date literal cannot be parsed or the unit
+            is not recognised.
     """
     from datetime import date, timedelta
 
@@ -354,14 +357,25 @@ class _Translator:
     # ── Grammar rules ─────────────────────────────────────────────────
 
     def translate(self) -> str:
-        """Entry point: produce the full RA expression string."""
+        """Produce the full RA expression string from the token stream.
+
+        Returns:
+            str: The translated relational algebra expression.
+
+        Raises:
+            SQLTranslationError: If the token stream does not match the
+                supported SQL grammar.
+        """
         result = self._parse_select()
         while self._peek_is('KW', 'UNION'):
-            self._consume()                      # consume UNION
+            self._consume()
+            is_union_all = False
             if self._peek_is('KW', 'ALL'):
-                self._consume()                  # UNION ALL → same semantics
+                self._consume() 
+                is_union_all = True
             rhs = self._parse_select()
-            result = f"({result} ∪ {rhs})"
+            merged = f"({result} ∪ {rhs})"
+            result = merged if is_union_all else f"δ({merged})"
         if self._peek() is not None:
             _, val = self._peek()
             raise SQLTranslationError(
@@ -418,7 +432,12 @@ class _Translator:
         return rel
 
     def _parse_col_list(self) -> Optional[List[str]]:
-        """Returns None for SELECT *, or a list of column name strings."""
+        """Parse the SELECT column list.
+
+        Returns:
+            Optional[List[str]]: ``None`` for ``SELECT *``, or a list of
+            column name strings.
+        """
         if self._peek_tag() == 'STAR':
             self._consume()
             return None
@@ -574,7 +593,18 @@ class _Translator:
         return f"{lhs} {self._SQL_TO_RA_OP[sql_op]} {rhs}"
 
     def _parse_in_list(self, lhs: str, negated: bool) -> str:
-        """Parse (v1, v2, ...) after IN keyword and emit RA IN expression."""
+        """Parse ``(v1, v2, ...)`` after the IN keyword and emit an RA IN expression.
+
+        Args:
+            lhs (str): The left-hand side expression string.
+            negated (bool): If ``True``, emit a ``NOT IN`` expression.
+
+        Returns:
+            str: RA-compatible IN or NOT IN expression string.
+
+        Raises:
+            SQLTranslationError: If the parenthesised value list is malformed.
+        """
         if self._peek_tag() != 'OPAR':
             raise SQLTranslationError("Expected '(' after IN")
         self._consume()
@@ -651,29 +681,16 @@ def sql_to_ra(sql: str) -> str:
 
     The returned string is compatible with ``src.parser.parse()``.
 
-    Parameters
-    ----------
-    sql : str
-        A SQL query using the supported subset (see module docstring).
+    Args:
+        sql (str): A SQL query using the supported subset (see module docstring).
 
-    Returns
-    -------
-    str
-        Relational algebra expression string, e.g.
-        ``"δ(π[Name](σ[Dept == 'Eng'](Emp)))"``
+    Returns:
+        str: Relational algebra expression string, e.g.
+        ``"δ(π[Name](σ[Dept == 'Eng'](Emp)))"``.
 
-    Raises
-    ------
-    SQLTranslationError
-        If the query uses an unsupported SQL construct or has a syntax error.
-
-    Examples
-    --------
-    >>> sql_to_ra("SELECT DISTINCT Name FROM Emp WHERE Dept = 'Eng'")
-    "δ(π[Name](σ[Dept == 'Eng'](Emp)))"
-
-    >>> sql_to_ra("SELECT A FROM R UNION SELECT A FROM S")
-    '(π[A](R) ∪ π[A](S))'
+    Raises:
+        SQLTranslationError: If the query uses an unsupported SQL construct
+            or has a syntax error.
     """
     tokens = _tokenize(sql.strip())
     if not tokens:
@@ -683,15 +700,22 @@ def sql_to_ra(sql: str) -> str:
 
 
 def sql_to_ra_with_aliases(sql: str) -> Tuple[str, Dict[str, str]]:
-    """
-    Like :func:`sql_to_ra` but also returns the alias→table mapping.
+    """Translate a SQL query to RA and also return the alias-to-table mapping.
 
-    Returns
-    -------
-    (str, Dict[str, str])
-        The RA expression string and a dict mapping each alias to its
-        real table name.  Only aliases that differ from the table name
-        are included (e.g. ``{'n1': 'nation', 'n2': 'nation'}``).
+    Like :func:`sql_to_ra` but additionally exposes the alias map built during
+    parsing, which is required for self-join queries.
+
+    Args:
+        sql (str): A SQL query using the supported subset.
+
+    Returns:
+        Tuple[str, Dict[str, str]]: A tuple of ``(ra_expression, alias_map)``
+        where ``alias_map`` maps each alias to its real table name.  Only
+        aliases that differ from the table name are included
+        (e.g. ``{'n1': 'nation', 'n2': 'nation'}``).
+
+    Raises:
+        SQLTranslationError: If the query cannot be translated.
     """
     tokens = _tokenize(sql.strip())
     if not tokens:

@@ -1,16 +1,16 @@
-"""
-AST node classes for the relational algebra parser.
+"""AST node classes for the relational algebra parser.
 
-Organised into three groups:
+Organised into four groups:
 
-* Algebra nodes (subclasses of :class:`Alg`) — relational operators:
-  Select, Project, Rename, Dedup, Group, Cross, Div, Inner, Outer, Anti,
-  Union, Intersect, Minus, Table.
-* Condition nodes (subclasses of :class:`Cond`) — boolean predicates:
-  And, Or, Not, Comp.
-* Atom nodes (subclasses of :class:`Atom`) — values inside predicates:
-  Attr (column reference), Val (literal).
-* Aggregation nodes: Aggr.
+- Algebra nodes (:class:`Alg` subclasses): relational operators
+  (``Select``, ``Project``, ``Rename``, ``Dedup``, ``Group``, ``Cross``,
+  ``Div``, ``Inner``, ``Outer``, ``Anti``, ``Union``, ``Intersect``,
+  ``Minus``, ``Table``).
+- Condition nodes (:class:`Cond` subclasses): boolean predicates
+  (``And``, ``Or``, ``Not``, ``Comp``, ``In``, ``Like``, ``Between``).
+- Atom nodes (:class:`Atom` subclasses): values inside predicates
+  (``Attr`` for column references, ``Val`` for literals, ``Mod`` for modulo).
+- Aggregation nodes (:class:`Aggr` subclasses): aggregation functions.
 """
 
 

@@ -13,10 +13,6 @@ In 𝔹: True ∧ True = True  (both tuples must be present)
 In ℕ: counts are multiplied
 In ℕ[X]: polynomials are multiplied  (provenance of a join)
 
-Note: the output schema is left.schema + right.schema. If a column
-name appears in both schemas, it is included twice. Renaming is the
-caller's responsibility.
-
 Complexity
 ----------
 O(n · m) — n = |supp(R)|, m = |supp(S)|.
@@ -31,28 +27,20 @@ def cross_product(
     left: KRelation,
     right: KRelation,
 ) -> KRelation:
-    """
-    Apply the × (cross product) operator to two K-annotated relations.
+    """Apply the × (cross product) operator to two K-annotated relations.
 
-    Parameters
-    ----------
-    left : KRelation
-        The left-hand input relation.
-    right : KRelation
-        The right-hand input relation.
+    Args:
+        left (KRelation): The left-hand input relation.
+        right (KRelation): The right-hand input relation.
 
-    Returns
-    -------
-    KRelation
-        New relation with schema = left.schema + right.schema.
-        Every pair of tuples (one from each input) appears in the
-        output with annotation = semiring.mul(left_ann, right_ann).
+    Returns:
+        KRelation: New relation with schema ``left.schema + right.schema``.
+        Every pair of tuples (one from each input) appears in the output with
+        annotation ``semiring.mul(left_ann, right_ann)``.
         Both input relations are not modified.
 
-    Raises
-    ------
-    ValueError
-        If left and right use different semirings.
+    Raises:
+        ValueError: If ``left`` and ``right`` use different semirings.
     """
     # ── validate semiring compatibility ────────────────────────────────
     if left.semiring is not right.semiring:

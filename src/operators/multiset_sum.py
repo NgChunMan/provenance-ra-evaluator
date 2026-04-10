@@ -30,27 +30,20 @@ def multiset_sum(
     left: KRelation,
     right: KRelation,
 ) -> KRelation:
-    """
-    Apply the ⊎ (multiset sum) operator to two K-annotated relations.
+    """Apply the ⊎ (multiset sum) operator to two K-annotated relations.
 
-    Parameters
-    ----------
-    left : KRelation
-        The left-hand input relation.
-    right : KRelation
-        The right-hand input relation.
+    Args:
+        left (KRelation): The left-hand input relation.
+        right (KRelation): The right-hand input relation.
 
-    Returns
-    -------
-    KRelation
-        New relation with the same schema as both inputs. Each tuple's
-        annotation is the semiring sum of its annotations in left and right.
-        Both input relations are not modified.
+    Returns:
+        KRelation: New relation with the same schema as both inputs.
+        Each tuple's annotation is the semiring sum of its annotations in
+        ``left`` and ``right``. Both input relations are not modified.
 
-    Raises
-    ------
-    ValueError
-        If left and right have different schemas or different semirings.
+    Raises:
+        ValueError: If ``left`` and ``right`` have different schemas or
+            different semirings.
     """
     # ── validate schema compatibility ──────────────────────────────────
     if left.schema != right.schema:

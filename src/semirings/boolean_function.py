@@ -1,9 +1,13 @@
 """
 Boolean Function semiring 𝔹[X].
 
-Unlike the plain Boolean semiring (𝔹), annotations here are 
-Boolean formulas over tuple-ID variables — expressions built from
-variable names, ∨ (OR), and ∧ (AND).
+Unlike the plain Boolean semiring (𝔹), annotations here are
+positive Boolean formulas over tuple-ID variables — expressions built
+from variable names, ∨ (OR), and ∧ (AND).
+
+Each clause represents a sufficient witness — a set of input tuples
+whose joint presence produces the output. Absorption ensures no clause
+is subsumed by another.
 """
 
 from __future__ import annotations
@@ -23,15 +27,20 @@ _TRUE: _Formula = frozenset([frozenset()])  # single empty clause — tautology
 
 
 def _absorb(clauses: Set[_Clause]) -> _Formula:
-    """
-    Remove subsumed clauses: if A ⊆ B, drop B (A is more general).
+    """Remove subsumed clauses: if A ⊆ B, drop B (A is more general).
 
-    A clause A is more general than B when A ⊆ B, because satisfying
+    A clause A is more general than B when ``A ⊆ B``, because satisfying
     A's variables is a weaker requirement than satisfying all of B's.
     Keeping only the most general clauses gives the canonical DNF.
 
-    Cost: O(k²) where k = number of clauses.
-    Usually k is small for the provenance use-case.
+    Cost: O(k²) where k = number of clauses. Usually k is small for the
+    provenance use-case.
+
+    Args:
+        clauses (Set[_Clause]): Raw set of conjunctive clauses to reduce.
+
+    Returns:
+        _Formula: Canonical frozenset of non-subsumed clauses.
     """
     reduced: list[_Clause] = []
     for candidate in clauses:
@@ -44,17 +53,17 @@ def _absorb(clauses: Set[_Clause]) -> _Formula:
 
 
 class BoolFunc:
-    """
-    An element of 𝔹[X]: a positive Boolean formula.
+    """An element of 𝔹[X]: a positive Boolean formula in canonical DNF.
 
-    Immutable. Equality and hashing are based on the canonical
-    absorbed DNF representation, so two logically equivalent formulas
-    that reduce to the same DNF compare equal.
+    Immutable. Equality and hashing are based on the canonical absorbed DNF
+    representation, so two logically equivalent formulas that reduce to the
+    same DNF compare equal.
 
     Do not construct directly — use the class methods:
-        BoolFunc.false_() →  zero element
-        BoolFunc.true_()  →  one element
-        BoolFunc.var(name) →  single-variable formula
+
+    - :meth:`false_`: zero element.
+    - :meth:`true_`: one element.
+    - :meth:`var`: single-variable formula.
     """
 
     __slots__ = ("_formula",)
@@ -66,40 +75,66 @@ class BoolFunc:
 
     @classmethod
     def false_(cls) -> BoolFunc:
-        """The zero element: an unsatisfiable formula (empty disjunction)."""
+        """Return the zero element: an unsatisfiable formula (empty disjunction).
+
+        Returns:
+            BoolFunc: The zero / ``False`` element.
+        """
         return cls(_FALSE)
 
     @classmethod
     def true_(cls) -> BoolFunc:
-        """The one element: a tautological formula (empty conjunction)."""
+        """Return the one element: a tautological formula (empty conjunction).
+
+        Returns:
+            BoolFunc: The one / ``True`` element.
+        """
         return cls(_TRUE)
 
     @classmethod
     def var(cls, name: str) -> BoolFunc:
-        """A single-variable formula: just the variable `name`."""
+        """Return a single-variable formula.
+
+        Args:
+            name (str): The variable name.
+
+        Returns:
+            BoolFunc: A formula consisting of just the single variable ``name``.
+        """
         return cls(frozenset([frozenset([name])]))
 
     # ── semiring operations ───────────────────────────────────────────
 
     def disjoin(self, other: BoolFunc) -> BoolFunc:
-        """
-        Disjunction (∨): self OR other.
+        """Return the disjunction (∨) of this formula and *other*.
 
         In DNF: union the two clause sets, then absorb subsumed clauses.
+
+        Args:
+            other (BoolFunc): The right-hand operand.
+
+        Returns:
+            BoolFunc: A new formula equivalent to ``self OR other``.
         """
         merged = set(self._formula) | set(other._formula)
         return BoolFunc(_absorb(merged))
 
     def conjoin(self, other: BoolFunc) -> BoolFunc:
-        """
-        Conjunction (∧): self AND other.
+        """Return the conjunction (∧) of this formula and *other*.
 
-        In DNF: distribute — for every pair of clauses (a, b), form a∪b.
+        In DNF: distribute — for every pair of clauses (a, b), form ``a∪b``.
         Then absorb subsumed clauses.
 
         Special cases:
-            False ∧ anything  =  False   (empty clause set stays empty)
-            True  ∧ x         =  x       (empty clause ∪ c = c)
+
+        - ``False ∧ anything = False`` (empty clause set stays empty).
+        - ``True ∧ x = x`` (empty clause ∪ c = c).
+
+        Args:
+            other (BoolFunc): The right-hand operand.
+
+        Returns:
+            BoolFunc: A new formula equivalent to ``self AND other``.
         """
         if not self._formula or not other._formula:
             return BoolFunc(_FALSE)
@@ -110,11 +145,19 @@ class BoolFunc:
         return BoolFunc(_absorb(distributed))
 
     def is_false(self) -> bool:
-        """True iff this formula is unsatisfiable (the zero element)."""
+        """Return ``True`` iff this formula is unsatisfiable (the zero element).
+
+        Returns:
+            bool: ``True`` when the formula has no clauses.
+        """
         return len(self._formula) == 0
 
     def variables(self) -> set[str]:
-        """All variable names that appear in any clause of this formula."""
+        """Return all variable names that appear in any clause of this formula.
+
+        Returns:
+            set[str]: The set of all variable names.
+        """
         return {v for clause in self._formula for v in clause}
 
     # ── display ───────────────────────────────────────────────────────
@@ -138,30 +181,36 @@ class BoolFunc:
 
 
 class BoolFuncSemiring(Semiring):
-    """
-    Semiring of positive Boolean functions over tuple variables.
+    """Semiring of positive Boolean functions over tuple variables.
 
-    Elements : BoolFunc
-    zero(): BoolFunc.false_() — unsatisfiable formula
-    one(): BoolFunc.true_() — tautology
-    add(a,b): a.disjoin(b) — logical OR
-    mul(a,b): a.conjoin(b) — logical AND
-    is_zero: a.is_false()
+    Elements are :class:`BoolFunc` instances (positive Boolean formulae in
+    DNF).
+
+    - ``zero()``: ``BoolFunc.false_()`` — the unsatisfiable formula.
+    - ``one()``: ``BoolFunc.true_()`` — the tautology.
+    - ``add(a, b)``: ``a.disjoin(b)`` — logical OR.
+    - ``mul(a, b)``: ``a.conjoin(b)`` — logical AND.
+    - ``is_zero(a)``: ``a.is_false()``.
     """
 
     def zero(self) -> BoolFunc:
+        """Return the zero element: the unsatisfiable formula (False)."""
         return BoolFunc.false_()
 
     def one(self) -> BoolFunc:
+        """Return the one element: the tautological formula (True)."""
         return BoolFunc.true_()
 
     def add(self, a: BoolFunc, b: BoolFunc) -> BoolFunc:
+        """Return the disjunction (∨) of two positive Boolean formulas."""
         return a.disjoin(b)
 
     def mul(self, a: BoolFunc, b: BoolFunc) -> BoolFunc:
+        """Return the conjunction (∧) of two positive Boolean formulas."""
         return a.conjoin(b)
 
     def is_zero(self, a: BoolFunc) -> bool:
+        """Return ``True`` iff the formula is unsatisfiable (the zero element)."""
         return a.is_false()
 
     @property

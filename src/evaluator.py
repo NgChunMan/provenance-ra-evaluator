@@ -1,6 +1,9 @@
 """
-Query evaluator: walks a parsed expression tree and dispatches
-each node to the corresponding operator implementation.
+Query evaluator for provenance-aware relational algebra over K-Relations.
+
+Walks a parsed expression tree and dispatches each AST node to the
+corresponding operator implementation, parameterised by a semiring
+and a deduplication strategy.
 
 The evaluator is the bridge between the parser (src/parser/) and the
 operator functions (src/operators/).  It pattern-matches on AST node
@@ -50,16 +53,12 @@ _UNSUPPORTED_OPS = {
 
 
 class UnsupportedOperatorError(NotImplementedError):
-    """
-    Raised when an expression node maps to an operator that has not
-    been implemented in this system.
+    """Raised when an expression node maps to an unimplemented operator.
 
-    Attributes
-    ----------
-    symbol : str
-        The Unicode symbol for the operator (e.g. ``'ɣ'``).
-    operator_name : str
-        The English name of the operator (e.g. ``'group-by / aggregation'``).
+    Attributes:
+        symbol (str): The Unicode symbol for the operator (e.g. ``'ɣ'``).
+        operator_name (str): The English name of the operator
+            (e.g. ``'group-by / aggregation'``).
     """
 
     def __init__(self, symbol: str, operator_name: str) -> None:
@@ -80,15 +79,22 @@ _CMP_OPS: Dict[str, Callable] = {
 
 
 def _coerce_pair(a: Any, b: Any):
-    """
-    Coerce *a* and *b* to compatible types for comparison.
+    """Coerce *a* and *b* to compatible types for comparison.
 
-    Rules (applied in order):
-    - If both are already the same type → return as-is.
-    - date vs str → parse the str as ISO date.
-    - Decimal vs int → promote the int to Decimal.
-    - Decimal vs str → parse the str as Decimal.
-    - int vs str → try int(str), fall back to identity.
+    Rules applied in order:
+
+    - If both are already the same type, return as-is.
+    - date vs str: parse the str as ISO date.
+    - Decimal vs int: promote the int to Decimal.
+    - Decimal vs str: parse the str as Decimal.
+    - int vs str: try int(str), fall back to identity.
+
+    Args:
+        a: Left operand.
+        b: Right operand.
+
+    Returns:
+        tuple: ``(a, b)`` coerced to compatible types.
     """
     if type(a) is type(b):
         return a, b
@@ -133,7 +139,14 @@ def _coerce_pair(a: Any, b: Any):
 
 
 def _coerced_cmp(cmp_fn: Callable) -> Callable:
-    """Wrap a comparison function with automatic type coercion."""
+    """Wrap a comparison function with automatic type coercion.
+
+    Args:
+        cmp_fn (Callable): A two-argument comparison function.
+
+    Returns:
+        Callable: A wrapped function that coerces its arguments before comparing.
+    """
     def _wrapper(a: Any, b: Any) -> bool:
         ca, cb = _coerce_pair(a, b)
         return cmp_fn(ca, cb)
@@ -141,14 +154,18 @@ def _coerced_cmp(cmp_fn: Callable) -> Callable:
 
 
 def _try_parse_val(val: Any) -> Any:
-    """
-    Attempt to parse a raw literal value (from a Val AST node) into its
-    most specific Python type. Called once at predicate-build time so
-    that per-row coercion is avoided for the common Attr <op> Val case.
+    """Attempt to parse a raw literal value into its most specific Python type.
 
-    - ISO date string 'YYYY-MM-DD' → datetime.date
-    - Decimal-formatted string → Decimal
-    - Everything else → unchanged
+    Called once at predicate-build time to avoid per-row coercion for the
+    common ``Attr <op> Val`` case.
+
+    Args:
+        val: Raw literal value from a ``Val`` AST node.
+
+    Returns:
+        The value converted to ``datetime.date`` for ISO date strings,
+        ``Decimal`` for decimal-formatted strings, or the original value
+        unchanged for everything else.
     """
     if not isinstance(val, str):
         return val
@@ -168,7 +185,17 @@ def _try_parse_val(val: Any) -> Any:
 
 
 def _build_atom_evaluator(node) -> Callable[[Dict[str, Any]], Any]:
-    """Return a callable that extracts/computes an atom value from a row dict."""
+    """Return a callable that extracts or computes an atom value from a row dict.
+
+    Args:
+        node: An ``Attr``, ``Val``, or ``Mod`` AST node.
+
+    Returns:
+        Callable: A function ``(row: dict) -> Any`` that evaluates the atom.
+
+    Raises:
+        ValueError: If ``node`` is not a recognised atom type.
+    """
     if isinstance(node, Attr):
         name = node.attr
         return lambda row, _n=name: row[_n]
@@ -183,7 +210,17 @@ def _build_atom_evaluator(node) -> Callable[[Dict[str, Any]], Any]:
 
 
 def _like_match(val: Any, pattern: Any, negated: bool) -> bool:
-    """Evaluate SQL LIKE match at runtime with a dynamic pattern."""
+    """Evaluate a SQL LIKE match at runtime with a dynamic pattern.
+
+    Args:
+        val: The value to test.
+        pattern: The SQL LIKE pattern (``%`` and ``_`` wildcards).
+        negated (bool): If ``True``, return ``True`` when the pattern does
+            NOT match.
+
+    Returns:
+        bool: Whether the match succeeded (after applying ``negated``).
+    """
     import re as _re
     if val is None or pattern is None:
         return False
@@ -193,18 +230,18 @@ def _like_match(val: Any, pattern: Any, negated: bool) -> bool:
 
 
 def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
-    """
-    Convert a condition AST node into a callable predicate.
+    """Convert a condition AST node into a callable predicate.
 
-    Parameters
-    ----------
-    cond
-        A condition node from the parser grammar (Comp, And, Or, Not).
+    Args:
+        cond: A condition node from the parser grammar
+            (``Comp``, ``And``, ``Or``, ``Not``, ``In``, ``Like``, ``Between``).
 
-    Returns
-    -------
-    Callable[[Dict[str, Any]], bool]
-        A function that takes a row dict and returns True/False.
+    Returns:
+        Callable[[Dict[str, Any]], bool]: A function that takes a row dict
+        and returns ``True`` when the condition holds.
+
+    Raises:
+        ValueError: If ``cond`` is not a recognised condition node type.
     """
     if isinstance(cond, Comp):
         cmp_fn = _coerced_cmp(_CMP_OPS[cond.op])
@@ -311,21 +348,16 @@ def _build_predicate(cond) -> Callable[[Dict[str, Any]], bool]:
 
 
 class Evaluator:
-    """
-    Evaluates a parsed relational algebra expression tree against a
-    fixed set of base tables and a chosen semiring.
+    """Evaluates a parsed relational algebra expression tree.
 
-    Parameters
-    ----------
-    tables : Dict[str, KRelation]
-        Mapping from table name (as it appears in the query) to a
-        pre-loaded KRelation.
-    semiring : Semiring
-        The semiring used for all operator computations.  Must match
-        the semiring of all provided tables.
-    strategy : DedupStrategy
-        The deduplication strategy to use for δ nodes.  Defaults to
-        EXISTENCE.
+    Walks an AST produced by :func:`src.parser.parse` and dispatches each
+    node to the corresponding operator implementation.
+
+    Attributes:
+        tables (Dict[str, KRelation]): Mapping from table name to relation.
+        semiring (Semiring): The semiring used for all operator computations.
+        strategy (DedupStrategy): Deduplication strategy for δ nodes.
+        alias_map (Dict[str, str]): Alias-to-table-name mapping for self-joins.
     """
 
     def __init__(
@@ -349,25 +381,19 @@ class Evaluator:
         }
 
     def evaluate(self, expression) -> KRelation:
-        """
-        Walk the expression tree and compute the result.
+        """Walk the expression tree and compute the result.
 
-        Parameters
-        ----------
-        expression
-            A parsed expression tree node (produced by src.parser).
+        Args:
+            expression: A parsed expression tree node produced by
+                :func:`src.parser.parse`.
 
-        Returns
-        -------
-        KRelation
-            The result of evaluating the full expression.
+        Returns:
+            KRelation: The result of evaluating the full expression.
 
-        Raises
-        ------
-        ValueError
-            If the query references an unknown table name.
-        UnsupportedOperatorError
-            If the expression contains an operator that is not implemented.
+        Raises:
+            ValueError: If the query references an unknown table name.
+            UnsupportedOperatorError: If the expression contains an operator
+                that is not implemented.
         """
         node_type = type(expression)
 
@@ -387,6 +413,7 @@ class Evaluator:
     # ── Private handler methods ────────────────────────────────────────
 
     def _eval_table(self, expression) -> KRelation:
+        """Resolve a Table leaf node to its KRelation, handling aliases."""
         name = expression.name
         if name in self.tables:
             return self.tables[name]
@@ -399,11 +426,18 @@ class Evaluator:
         raise ValueError(f"Unknown table: {name!r}")
 
     def _prefix_relation(self, rel: KRelation, alias: str) -> KRelation:
-        """
-        Create a copy of *rel* with every column prefixed as ``alias.col``.
+        """Create a copy of *rel* with every column prefixed as ``alias.col``.
 
-        This supports self-joins: ``FROM nation n1, nation n2`` produces
-        two copies whose columns are ``n1.n_nationkey``, ``n2.n_nationkey``, etc.
+        Supports self-joins: ``FROM nation n1, nation n2`` produces two copies
+        whose columns are ``n1.n_nationkey``, ``n2.n_nationkey``, etc.
+
+        Args:
+            rel (KRelation): The source relation to copy.
+            alias (str): The alias prefix to apply to each column name.
+
+        Returns:
+            KRelation: A new relation with prefixed column names and the same
+            annotations as the original.
         """
         new_schema = [f"{alias}.{col}" for col in rel.schema]
         result = KRelation(new_schema, rel.semiring)
@@ -413,27 +447,32 @@ class Evaluator:
         return result
 
     def _eval_select(self, expression) -> KRelation:
+        """Evaluate a σ (selection) node: build predicate and apply selection."""
         sub_rel = self.evaluate(expression.rel)
         pred = _build_predicate(expression.cond)
         return selection(sub_rel, pred)
 
     def _eval_project(self, expression) -> KRelation:
+        """Evaluate a π (projection) node: extract attributes and project."""
         sub_rel = self.evaluate(expression.rel)
         attrs = [a.attr if isinstance(a, Attr) else str(a)
                  for a in expression.attrs]
         return projection(sub_rel, attrs)
 
     def _eval_cross(self, expression) -> KRelation:
+        """Evaluate a × (cross product) node."""
         return cross_product(
             self.evaluate(expression.lhs),
             self.evaluate(expression.rhs),
         )
 
     def _eval_union(self, expression) -> KRelation:
+        """Evaluate a ∪ node as multiset sum (⊎)."""
         return multiset_sum(
             self.evaluate(expression.lhs),
             self.evaluate(expression.rhs),
         )
 
     def _eval_dedup(self, expression) -> KRelation:
+        """Evaluate a δ (deduplication) node using the configured strategy."""
         return deduplication(self.evaluate(expression.rel), self.strategy)

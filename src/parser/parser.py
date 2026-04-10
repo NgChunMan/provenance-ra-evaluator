@@ -30,24 +30,18 @@ from src.parser.grammar import (
 # Parse
 #########################
 def parse(expr):
-    """
-    Parse a relational algebra expression string into an AST.
+    """Parse a relational algebra expression string into an AST.
 
-    Parameters
-    ----------
-    expr : str
-        A relational algebra expression using Unicode operator symbols
-        (e.g. ``σ[A == 1](R)``, ``π[A](R × S)``).
+    Args:
+        expr (str): A relational algebra expression using Unicode operator
+            symbols (e.g. ``σ[A == 1](R)``, ``π[A](R × S)``).
 
-    Returns
-    -------
-    Alg
-        The root AST node of the parsed expression.
+    Returns:
+        Alg: The root AST node of the parsed expression.
 
-    Raises
-    ------
-    Exception
-        If the expression contains unknown symbols or is syntactically invalid.
+    Raises:
+        Exception: If the expression contains unknown symbols or is
+            syntactically invalid.
     """
     tokens = tokenizer(expr)
     return parser(tokens)
@@ -63,25 +57,18 @@ AGG = ('COUNT', 'MAX', 'MIN', 'SUM', 'AVG')
 
 
 def tokenizer(s):
-    """
-    Tokenize a relational algebra expression string.
+    """Tokenize a relational algebra expression string.
 
-    Parameters
-    ----------
-    s : str
-        Raw expression string.
+    Args:
+        s (str): Raw expression string.
 
-    Returns
-    -------
-    list[list]
-        A list of tokens.  Each token is a list whose first element is a
-        tag string (e.g. ``'SELECT'``, ``'NAME'``, ``'VAL'``) and whose
+    Returns:
+        list[list]: A list of tokens. Each token is a list whose first element
+        is a tag string (e.g. ``'SELECT'``, ``'NAME'``, ``'VAL'``) and whose
         optional second element carries the token's payload value.
 
-    Raises
-    ------
-    Exception
-        If an unrecognised symbol is encountered.
+    Raises:
+        Exception: If an unrecognised symbol is encountered.
     """
 
     def match(v):
@@ -239,35 +226,28 @@ def tokenizer(s):
 # Parser
 #########################
 def parser(tok):
-    """
-    Convert a token list produced by :func:`tokenizer` into an AST.
+    """Convert a token list produced by :func:`tokenizer` into an AST.
 
     The grammar is a recursive-descent parser organised into the following
     levels (highest to lowest precedence):
 
-    * ``parse_alg``   — binary algebra operators (×, ÷, ⋈, ∪, ∩, -)
-    * ``parse_expr``  — unary prefix operators (σ, π, ρ, δ, ɣ) and base cases
-    * ``parse_log``   — logical connectives (AND, OR, NOT)
-    * ``parse_rel``   — relational comparisons (==, !=, >=, <=, >, <)
-    * ``parse_cond``  — atomic terms (VAL literals, NAME attributes, parentheses)
-    * ``parse_attrs`` — comma-separated attribute lists
-    * ``parse_aggrs`` — comma-separated aggregation lists
-    * ``parse_aggr``  — single aggregation expression
+    - ``parse_alg``: binary algebra operators (×, ÷, ⋈, ∪, ∩, -).
+    - ``parse_expr``: unary prefix operators (σ, π, ρ, δ, ɣ) and base cases.
+    - ``parse_log``: logical connectives (AND, OR, NOT).
+    - ``parse_rel``: relational comparisons (==, !=, >=, <=, >, <).
+    - ``parse_cond``: atomic terms (VAL literals, NAME attributes, parentheses).
+    - ``parse_attrs``: comma-separated attribute lists.
+    - ``parse_aggrs``: comma-separated aggregation lists.
+    - ``parse_aggr``: single aggregation expression.
 
-    Parameters
-    ----------
-    tok : list[list]
-        Token list produced by :func:`tokenizer`.
+    Args:
+        tok (list[list]): Token list produced by :func:`tokenizer`.
 
-    Returns
-    -------
-    Alg
-        Root AST node representing the full expression.
+    Returns:
+        Alg: Root AST node representing the full expression.
 
-    Raises
-    ------
-    Exception
-        If the token stream does not conform to the grammar.
+    Raises:
+        Exception: If the token stream does not conform to the grammar.
     """
 
     def match(tag):
