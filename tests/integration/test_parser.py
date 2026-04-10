@@ -73,7 +73,7 @@ from src.parser import (
     parse,
     Select, Project, Cross, Dedup, Table,
 )
-from src.evaluator import Evaluator
+from src.evaluator import Evaluator, UnsupportedOperatorError
 from src.semirings import BOOL_SR
 from src.relation.k_relation import KRelation
 
@@ -222,3 +222,30 @@ def test_parser_eval_attr_attr_comparison(ev):
     assert result.support_size() == 2
     for key in result._data:
         assert key[1] == key[2]  # B == C
+
+
+# ── UnsupportedOperatorError tests ───────────────────────────────────
+
+@pytest.mark.parametrize("ra_expr,expected_symbol,expected_name", [
+    ("ρ(A, B)",              "ρ",  "rename"),
+    ("R ÷ S",                "÷",  "division"),
+    ("R ⨝[A == C] S",        "⨝",  "inner join"),
+    ("R ⟕[A == C] S",        "⟕",  "left outer join"),
+    ("R ⊳[A == C] S",        "⊳",  "anti join"),
+    ("R ∩ S",                "∩",  "intersection"),
+    ("R - S",                "-",  "set difference"),
+])
+def test_unsupported_operator_raises(ev, ra_expr, expected_symbol, expected_name):
+    """TC-18: Evaluating an unsupported operator raises UnsupportedOperatorError
+    with the correct symbol and operator_name attributes."""
+    with pytest.raises(UnsupportedOperatorError) as exc_info:
+        ev.evaluate(parse(ra_expr))
+    err = exc_info.value
+    assert err.symbol == expected_symbol
+    assert err.operator_name == expected_name
+
+
+def test_unsupported_operator_is_not_implemented_error(ev):
+    """TC-19: UnsupportedOperatorError is a subclass of NotImplementedError."""
+    with pytest.raises(NotImplementedError):
+        ev.evaluate(parse("R ÷ S"))
