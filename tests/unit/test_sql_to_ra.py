@@ -148,13 +148,13 @@ def test_full_pipeline():
 # ── UNION ─────────────────────────────────────────────────────────────
 
 def test_union():
-    """TC-18: UNION of two queries → ∪."""
+    """TC-18: UNION deduplicates → δ(⊎)."""
     result = sql_to_ra("SELECT A FROM R UNION SELECT A FROM S")
-    assert result == "(π[A](R) ∪ π[A](S))"
+    assert result == "δ((π[A](R) ∪ π[A](S)))"
 
 
 def test_union_all():
-    """TC-19: UNION ALL is treated as multiset UNION."""
+    """TC-19: UNION ALL keeps all copies → plain ⊎, no deduplication."""
     result = sql_to_ra("SELECT A FROM R UNION ALL SELECT A FROM S")
     assert result == "(π[A](R) ∪ π[A](S))"
 
