@@ -77,25 +77,25 @@ Benchmarks on eight adapted TPC-H queries demonstrate that provenance tracking v
 │   ├── 18.sql
 │   └── 19.sql
 │
-├── tests/                             # Test suite (unit + integration)
-│   ├── __init__.py
-│   ├── unit/                          # Unit tests for individual operators, semirings, etc.
-│   │   ├── test_cross_product.py
-│   │   ├── test_date_and_loader.py
-│   │   ├── test_deduplication.py
-│   │   ├── test_k_relation.py
-│   │   ├── test_multiset_sum.py
-│   │   ├── test_new_predicates.py
-│   │   ├── test_projection.py
-│   │   ├── test_selection.py
-│   │   ├── test_semirings.py
-│   │   └── test_sql_to_ra.py
-│   └── integration/                   # Integration tests for parser and full pipeline
-│       ├── test_parser.py
-│       └── test_pipeline.py
-│
-└── report/
-    └── paper.tex                      # Research paper (Springer LNCS format)
+└── tests/                             # Test suite (unit + integration)
+    ├── __init__.py
+    ├── unit/                          # Unit tests for individual operators, semirings, etc.
+    │   ├── __init__.py
+    │   ├── test_cross_product.py
+    │   ├── test_date_and_loader.py
+    │   ├── test_deduplication.py
+    │   ├── test_k_relation.py
+    │   ├── test_multiset_sum.py
+    │   ├── test_new_predicates.py
+    │   ├── test_projection.py
+    │   ├── test_selection.py
+    │   ├── test_semirings.py
+    │   └── test_sql_to_ra.py
+    └── integration/                   # Integration tests for parser and full pipeline
+        ├── __init__.py
+        ├── test_parser.py
+        └── test_pipeline.py
+
 ```
 
 ---
@@ -152,6 +152,8 @@ instructions to reproduce all benchmark tables and figures from the paper.
 ---
 
 ## Operators
+
+Here $n = |\text{supp}(R)|$ and $m = |\text{supp}(S)|$ denote the number of tuples with nonzero annotation in each input relation.
 
 | Operator      | Symbol          | Function          | Semiring operation | Complexity     | Description                                                             |
 | ------------- | --------------- | ----------------- | ------------------ | -------------- | ----------------------------------------------------------------------- |
