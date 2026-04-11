@@ -153,6 +153,8 @@ instructions to reproduce all benchmark tables and figures from the paper.
 
 ## Operators
 
+Here $n = |\text{supp}(R)|$ and $m = |\text{supp}(S)|$ denote the number of tuples with nonzero annotation in each input relation.
+
 | Operator      | Symbol          | Function          | Semiring operation | Complexity     | Description                                                             |
 | ------------- | --------------- | ----------------- | ------------------ | -------------- | ----------------------------------------------------------------------- |
 | Selection     | $\sigma_\theta$ | `selection()`     | identity (copy)    | $O(n)$         | Retain tuples satisfying predicate $\theta$; annotation unchanged       |
